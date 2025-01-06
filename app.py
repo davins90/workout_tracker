@@ -1,8 +1,7 @@
-# app.py
 import streamlit as st
 from datetime import datetime
-import pandas as pd
-from gspread_pandas import Spread
+from google.cloud import bigquery
+from google.oauth2 import service_account
 from config import WORKOUT_DATA
 
 # Configurazione della pagina
@@ -12,81 +11,110 @@ st.set_page_config(
     layout="wide"
 )
 
-def connect_to_sheet():
-    """Connette al foglio Google usando gspread-pandas"""
+def connect_to_bq():
+    """Connette a BigQuery usando le credenziali nei secrets"""
     try:
-        # Usa l'URL dal secrets.toml
-        spread = Spread(st.secrets["gsheets"]["spreadsheet_url"])
-        return spread
+        credentials = service_account.Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"]
+        )
+        return bigquery.Client(credentials=credentials, project=credentials.project_id)
     except Exception as e:
-        st.error(f"Errore di connessione al foglio: {e}")
+        st.error(f"Errore di connessione a BigQuery: {e}")
         return None
 
-def load_last_workout_data(spread, workout_type):
-    """Carica l'ultimo allenamento salvato"""
+def load_last_workout_data(client, workout_type):
+    """Carica l'ultimo allenamento per ogni esercizio"""
+    query = f"""
+    WITH RankedWorkouts AS (
+        SELECT 
+            *,
+            ROW_NUMBER() OVER (
+                PARTITION BY exercise_name 
+                ORDER BY date DESC
+            ) as rn
+        FROM `{st.secrets["bigquery"]["table_id"]}`
+        WHERE workout_type = '{workout_type}'
+    )
+    SELECT 
+        exercise_name,
+        series1,
+        series2,
+        series3,
+        series4
+    FROM RankedWorkouts
+    WHERE rn = 1
+    """
+    
     try:
-        # Carica il foglio come DataFrame
-        df = spread.sheet_to_df(index=False)
+        df = client.query(query).to_dataframe()
         if df.empty:
             return {}
-            
-        # Filtra per tipo di allenamento e prendi l'ultima data
-        filtered_data = df[df['Tipo_Allenamento'] == workout_type]
-        if filtered_data.empty:
-            return {}
-            
-        last_date = filtered_data['Data'].max()
-        last_workout = filtered_data[filtered_data['Data'] == last_date]
         
-        # Crea dizionario con gli ultimi pesi
+        # Converti in dizionario
         last_weights = {}
-        for _, row in last_workout.iterrows():
-            weights = [row['Serie1'], row['Serie2'], row['Serie3']]
-            if 'Serie4' in row:
-                weights.append(row['Serie4'])
-            last_weights[row['Esercizio']] = weights
+        for _, row in df.iterrows():
+            weights = [
+                str(row['series1']) if pd.notna(row['series1']) else '',
+                str(row['series2']) if pd.notna(row['series2']) else '',
+                str(row['series3']) if pd.notna(row['series3']) else '',
+                str(row['series4']) if pd.notna(row['series4']) else ''
+            ]
+            last_weights[row['exercise_name']] = weights
             
         return last_weights
     except Exception as e:
         st.error(f"Errore nel caricamento dati: {e}")
         return {}
 
-def save_workout(spread, date, workout_type, group, exercise, weights):
-    """Salva i dati dell'allenamento"""
+def save_workout(client, date, workout_type, group, exercise, weights):
+    """Salva l'allenamento in BigQuery"""
+    # Prepara i valori delle serie, gestendo i valori vuoti
+    series_values = weights + [''] * (4 - len(weights))
+    series_values = [w if w != '' else 'NULL' for w in series_values]
+    
+    query = f"""
+    INSERT INTO `{st.secrets["bigquery"]["table_id"]}`
+    (date, workout_type, exercise_group, exercise_name, series1, series2, series3, series4)
+    VALUES
+    ('{date.strftime('%Y-%m-%d')}', '{workout_type}', '{group}', '{exercise}',
+     {series_values[0]}, {series_values[1]}, {series_values[2]}, {series_values[3]})
+    """
+    
     try:
-        # Carica i dati esistenti
-        existing_data = spread.sheet_to_df(index=False)
-        
-        # Crea nuova riga
-        new_row = pd.DataFrame([{
-            'Data': date.strftime('%Y-%m-%d'),
-            'Tipo_Allenamento': workout_type,
-            'Gruppo': group,
-            'Esercizio': exercise,
-            'Serie1': weights[0],
-            'Serie2': weights[1],
-            'Serie3': weights[2],
-            'Serie4': weights[3] if len(weights) > 3 else ''
-        }])
-        
-        # Concatena i dati
-        updated_data = pd.concat([existing_data, new_row], ignore_index=True)
-        
-        # Salva tutto il DataFrame
-        spread.df_to_sheet(updated_data, index=False, replace=True)
+        client.query(query)
         return True
     except Exception as e:
         st.error(f"Errore nel salvataggio: {e}")
         return False
 
+def load_workout_history(client):
+    """Carica lo storico degli allenamenti"""
+    query = f"""
+    SELECT 
+        date,
+        workout_type,
+        exercise_group,
+        exercise_name,
+        series1,
+        series2,
+        series3,
+        series4
+    FROM `{st.secrets["bigquery"]["table_id"]}`
+    ORDER BY date DESC
+    """
+    
+    try:
+        return client.query(query).to_dataframe()
+    except Exception as e:
+        st.error(f"Errore nel caricamento dello storico: {e}")
+        return pd.DataFrame()
+
 def main():
     st.title("💪 Workout Tracker")
     
-    # Connessione al foglio
-    spread = connect_to_sheet()
-    
-    if spread is None:
-        st.error("Impossibile connettersi al foglio Google. Verifica l'URL nel file secrets.toml")
+    # Connessione a BigQuery
+    client = connect_to_bq()
+    if client is None:
         return
     
     # Selezione del giorno e della data
@@ -94,7 +122,7 @@ def main():
     workout_date = st.date_input("Data dell'allenamento", datetime.now())
     
     # Carica gli ultimi dati inseriti per il pre-popolamento
-    last_workout_data = load_last_workout_data(spread, workout_type)
+    last_workout_data = load_last_workout_data(client, workout_type)
     
     # Mostra gli esercizi per gruppo muscolare
     for gruppo, esercizi in WORKOUT_DATA[workout_type].items():
@@ -123,34 +151,35 @@ def main():
                 
                 # Pulsante salva per questo esercizio
                 if st.button(f"📝 Salva {esercizio['nome']}", key=f"save_{esercizio['nome']}"):
-                    if save_workout(spread, workout_date, workout_type, gruppo, esercizio["nome"], weights):
+                    if save_workout(client, workout_date, workout_type, gruppo, esercizio["nome"], weights):
                         st.success(f"Pesi salvati per {esercizio['nome']}")
                 
                 st.markdown("---")
     
     # Visualizzazione storico
     st.header("📊 Storico Allenamenti")
-    try:
-        data = spread.sheet_to_df(index=False)
-        if not data.empty:
-            data = data.sort_values('Data', ascending=False)
-            for date in data['Data'].unique():
-                with st.expander(f"Allenamento del {date}"):
-                    day_data = data[data['Data'] == date]
-                    for tipo in day_data['Tipo_Allenamento'].unique():
-                        st.subheader(tipo)
-                        tipo_data = day_data[day_data['Tipo_Allenamento'] == tipo]
-                        for gruppo in tipo_data['Gruppo'].unique():
-                            st.write(f"**{gruppo}**")
-                            gruppo_data = tipo_data[tipo_data['Gruppo'] == gruppo]
-                            for _, row in gruppo_data.iterrows():
-                                weights = [str(row['Serie1']), str(row['Serie2']), str(row['Serie3'])]
-                                if 'Serie4' in row and pd.notna(row['Serie4']):
-                                    weights.append(str(row['Serie4']))
-                                weights = [w for w in weights if w != 'nan' and w != '']
-                                st.write(f"- {row['Esercizio']}: {', '.join(weights)} kg")
-    except Exception as e:
-        st.error(f"Errore nel caricamento dello storico: {e}")
+    history_df = load_workout_history(client)
+    
+    if not history_df.empty:
+        for date in history_df['date'].unique():
+            with st.expander(f"Allenamento del {date}"):
+                day_data = history_df[history_df['date'] == date]
+                for tipo in day_data['workout_type'].unique():
+                    st.subheader(tipo)
+                    tipo_data = day_data[day_data['workout_type'] == tipo]
+                    for gruppo in tipo_data['exercise_group'].unique():
+                        st.write(f"**{gruppo}**")
+                        gruppo_data = tipo_data[tipo_data['exercise_group'] == gruppo]
+                        for _, row in gruppo_data.iterrows():
+                            weights = [
+                                str(row['series1']),
+                                str(row['series2']),
+                                str(row['series3'])
+                            ]
+                            if pd.notna(row['series4']):
+                                weights.append(str(row['series4']))
+                            weights = [w for w in weights if w != 'nan' and w != '']
+                            st.write(f"- {row['exercise_name']}: {', '.join(weights)} kg")
 
 if __name__ == "__main__":
     main()

@@ -1,3 +1,4 @@
 streamlit==1.40.0
-gspread-pandas==3.3.0
+google-cloud-bigquery
+db-dtypes
 pandas==2.2.3
