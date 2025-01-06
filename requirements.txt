@@ -1,4 +1,6 @@
 streamlit==1.40.0
 google-cloud-bigquery
+google-cloud-bigquery-storage
 db-dtypes
+pyarrow
 pandas==2.2.3
