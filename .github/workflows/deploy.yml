@@ -55,5 +55,5 @@ jobs:
             --source . \
             --region europe-west8 \
             --project workout-tracker-uexmt \
-            --allow-unauthenticated \
+            --no-allow-unauthenticated \
             --quiet

@@ -131,27 +131,30 @@ export function SyncSettings({
             </div>
           </div>
 
-          <form
-            className="flex items-center gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void onSaveAccessCode(codeInput.trim());
-            }}
-          >
-            <KeyRound className="h-4 w-4 text-muted-foreground shrink-0" />
-            <Input
-              type="password"
-              autoComplete="current-password"
-              placeholder="Codice di accesso"
-              aria-label="Codice di accesso"
-              value={codeInput}
-              onChange={(e) => setCodeInput(e.target.value)}
-              className="h-10"
-            />
-            <Button type="submit" variant="outline" disabled={isSyncing || !codeInput.trim()} className="h-10">
-              Salva
-            </Button>
-          </form>
+          {/* Only needed without Google login in front of the app */}
+          {(syncStatus === "locked" || accessCode) && (
+            <form
+              className="flex items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void onSaveAccessCode(codeInput.trim());
+              }}
+            >
+              <KeyRound className="h-4 w-4 text-muted-foreground shrink-0" />
+              <Input
+                type="password"
+                autoComplete="current-password"
+                placeholder="Codice di accesso"
+                aria-label="Codice di accesso"
+                value={codeInput}
+                onChange={(e) => setCodeInput(e.target.value)}
+                className="h-10"
+              />
+              <Button type="submit" variant="outline" disabled={isSyncing || !codeInput.trim()} className="h-10">
+                Salva
+              </Button>
+            </form>
+          )}
 
           <Button
             onClick={onCloudSync}

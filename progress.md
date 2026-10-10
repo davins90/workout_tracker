@@ -21,6 +21,6 @@ Applicazione web moderna per il tracciamento degli allenamenti, progressioni di 
 - [x] Commit e push del codice Next.js su GitHub.
 - [x] CI/CD GitHub Actions con controlli (typecheck, test, build) e deploy su Cloud Run.
 - [x] API protetta da codice di accesso, sincronizzazione con unione dei dati, registrazione delle ripetizioni.
-- [ ] Login con Google (IAP) al posto del codice di accesso: richiede un client OAuth creato a mano in console.
+- [x] Login con Google tramite IAP (client OAuth personalizzato), accesso pubblico chiuso.
 - [ ] Aggiornamento a una major di Next.js più recente (la linea 14.x ha avvisi di sicurezza aperti).
 - [ ] Pianificare la migrazione del servizio Cloud Run su `dani-lab-507314` (quando vorrai consolidare i progetti).

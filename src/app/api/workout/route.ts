@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Storage } from "@google-cloud/storage";
+import { OAuth2Client } from "google-auth-library";
 import { createHash, timingSafeEqual } from "crypto";
 import fs from "fs";
 import path from "path";
@@ -20,12 +21,39 @@ function digest(value: string) {
   return createHash("sha256").update(value).digest();
 }
 
+// Set when the service sits behind Identity-Aware Proxy: /projects/NUMBER/locations/REGION/services/NAME
+const IAP_AUDIENCE = process.env.IAP_AUDIENCE;
+const IAP_ALLOWED_EMAILS = (process.env.IAP_ALLOWED_EMAILS || "")
+  .split(",")
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean);
+const oauthClient = new OAuth2Client();
+
+// True when the request carries a valid IAP-signed identity for an allowed user
+async function isIapUser(req: NextRequest): Promise<boolean> {
+  const assertion = req.headers.get("x-goog-iap-jwt-assertion");
+  if (!IAP_AUDIENCE || !assertion) return false;
+  try {
+    const { pubkeys } = await oauthClient.getIapPublicKeys();
+    const ticket = await oauthClient.verifySignedJwtWithCertsAsync(assertion, pubkeys, IAP_AUDIENCE, [
+      "https://cloud.google.com/iap",
+    ]);
+    const email = ticket.getPayload()?.email?.toLowerCase();
+    return !!email && (IAP_ALLOWED_EMAILS.length === 0 || IAP_ALLOWED_EMAILS.includes(email));
+  } catch (err) {
+    console.warn("IAP assertion rejected:", (err as Error).message);
+    return false;
+  }
+}
+
 // Returns an error response when the request is not allowed, null otherwise
-function checkAccess(req: NextRequest): NextResponse | null {
+async function checkAccess(req: NextRequest): Promise<NextResponse | null> {
+  if (await isIapUser(req)) return null;
+
   const expected = process.env.APP_ACCESS_CODE;
   if (!expected) {
     if (!IS_PRODUCTION) return null;
-    return NextResponse.json({ error: "Codice di accesso non configurato sul server" }, { status: 503 });
+    return NextResponse.json({ error: "Accesso non configurato sul server" }, { status: 503 });
   }
   const header = req.headers.get("authorization") || "";
   const provided = header.startsWith("Bearer ") ? header.slice(7) : "";
@@ -73,7 +101,7 @@ function readLocal(): ExerciseHistoryMap {
 }
 
 export async function GET(req: NextRequest) {
-  const denied = checkAccess(req);
+  const denied = await checkAccess(req);
   if (denied) return denied;
 
   try {
@@ -96,7 +124,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const denied = checkAccess(req);
+  const denied = await checkAccess(req);
   if (denied) return denied;
 
   const raw = await req.text();

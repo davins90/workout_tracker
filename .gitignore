@@ -40,3 +40,6 @@ venv/
 
 # local dev data
 /data/workout_history.json
+
+# jupyter
+.ipynb_checkpoints/

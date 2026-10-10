@@ -14,13 +14,21 @@ Applicazione web per tracciare gli allenamenti, sviluppata con Next.js 14 (App R
 - **Sincronizzazione**: i dati restano sul dispositivo (`localStorage`) e vengono uniti a quelli nel cloud, una voce per esercizio per giorno; a parità di giorno vince la modifica più recente.
 - **Backup** manuale: esportazione e importazione in JSON.
 
-## API
-`GET` e `POST /api/workout` richiedono l'header `Authorization: Bearer <codice>`.
+## Accesso
+Il servizio è dietro Identity-Aware Proxy: si entra con il login Google e solo gli account autorizzati passano. L'API verifica l'identità firmata da IAP (header `x-goog-iap-jwt-assertion`); in alternativa accetta `Authorization: Bearer <codice>`.
 
 | Variabile | Uso |
 | :--- | :--- |
-| `APP_ACCESS_CODE` | Codice di accesso. Obbligatorio in produzione (su Cloud Run arriva dal secret `workout-access-code`). |
+| `IAP_AUDIENCE` | Audience del token IAP: `/projects/NUMERO/locations/REGIONE/services/NOME`. |
+| `IAP_ALLOWED_EMAILS` | Email ammesse, separate da virgola (vuoto: tutte quelle autorizzate in IAP). |
+| `APP_ACCESS_CODE` | Codice di accesso alternativo (su Cloud Run arriva dal secret `workout-access-code`). |
 | `GCS_BUCKET_NAME` | Bucket dello storico. Default: `workout-tracker-uexmt-data`. |
+
+Per autorizzare un altro account:
+```bash
+gcloud iap web add-iam-policy-binding --member=user:EMAIL --role=roles/iap.httpsResourceAccessor \
+  --project=workout-tracker-uexmt --region=europe-west8 --resource-type=cloud-run --service=workout-tracker
+```
 
 In sviluppo, senza credenziali Google, lo storico viene salvato in `data/workout_history.json`.
 
