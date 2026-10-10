@@ -1,28 +1,43 @@
 "use client";
 
-import React, { useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/use-toast";
 import { ExerciseHistoryMap } from "@/lib/workout-data";
-import { Cloud, Download, Upload, RefreshCw, CheckCircle2, ShieldCheck, Database } from "lucide-react";
+import { sanitizeHistory } from "@/lib/history";
+import { Cloud, Download, Upload, RefreshCw, ShieldCheck, Database, KeyRound } from "lucide-react";
 
 interface SyncSettingsProps {
   history: ExerciseHistoryMap;
   onImport: (newHistory: ExerciseHistoryMap) => void;
   onCloudSync: () => Promise<void>;
-  isSyncing: boolean;
-  lastSyncSource: string;
+  syncStatus: "loading" | "syncing" | "synced" | "pending" | "locked";
+  accessCode: string;
+  onSaveAccessCode: (code: string) => Promise<void>;
 }
+
+const STATUS_LABELS: Record<SyncSettingsProps["syncStatus"], string> = {
+  loading: "Caricamento...",
+  syncing: "Sincronizzazione in corso...",
+  synced: "Sincronizzato con il cloud",
+  pending: "Solo su questo dispositivo (da sincronizzare)",
+  locked: "Codice di accesso richiesto",
+};
 
 export function SyncSettings({
   history,
   onImport,
   onCloudSync,
-  isSyncing,
-  lastSyncSource,
+  syncStatus,
+  accessCode,
+  onSaveAccessCode,
 }: SyncSettingsProps) {
+  const isSyncing = syncStatus === "syncing" || syncStatus === "loading";
+  const [codeInput, setCodeInput] = useState(accessCode);
+  useEffect(() => setCodeInput(accessCode), [accessCode]);
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -57,12 +72,12 @@ export function SyncSettings({
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const parsed = JSON.parse(event.target?.result as string);
-        if (typeof parsed === "object" && parsed !== null) {
+        const parsed = sanitizeHistory(JSON.parse(event.target?.result as string));
+        if (parsed) {
           onImport(parsed);
           toast({
             title: "Dati importati con successo!",
-            description: "La cronologia dei tuoi allenamenti è stata aggiornata.",
+            description: "Le sessioni del backup sono state aggiunte alla cronologia.",
           });
         } else {
           throw new Error("Formato file non valido");
@@ -93,13 +108,9 @@ export function SyncSettings({
               <Cloud className="h-5 w-5 text-primary" />
               <CardTitle className="text-lg">Salvataggio & Cloud Storage</CardTitle>
             </div>
-            <Badge variant="outline" className="flex items-center gap-1.5 text-xs text-emerald-600 border-emerald-500/30 bg-emerald-500/10">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              Google Cloud Storage
-            </Badge>
           </div>
           <CardDescription className="text-xs sm:text-sm">
-            Tutti i carichi vengono memorizzati in tempo reale nel bucket Google Cloud e nella memoria locale del dispositivo.
+            I dati vengono salvati subito su questo dispositivo e sincronizzati con il cloud appena c'è connessione.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 pt-2">
@@ -107,18 +118,40 @@ export function SyncSettings({
             <div className="flex justify-between items-center">
               <span className="text-muted-foreground flex items-center gap-1.5">
                 <Database className="h-3.5 w-3.5" />
-                Origine dati:
+                Stato:
               </span>
-              <span className="font-semibold">{lastSyncSource === "cloud" ? "Cloud Storage (GCP)" : "Cache Locale (Offline)"}</span>
+              <span className="font-semibold text-right">{STATUS_LABELS[syncStatus]}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-muted-foreground flex items-center gap-1.5">
                 <ShieldCheck className="h-3.5 w-3.5" />
-                Voci totali registrate:
+                Sessioni registrate:
               </span>
-              <span className="font-semibold">{totalRecords} serie salvate</span>
+              <span className="font-semibold">{totalRecords}</span>
             </div>
           </div>
+
+          <form
+            className="flex items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void onSaveAccessCode(codeInput.trim());
+            }}
+          >
+            <KeyRound className="h-4 w-4 text-muted-foreground shrink-0" />
+            <Input
+              type="password"
+              autoComplete="current-password"
+              placeholder="Codice di accesso"
+              aria-label="Codice di accesso"
+              value={codeInput}
+              onChange={(e) => setCodeInput(e.target.value)}
+              className="h-10"
+            />
+            <Button type="submit" variant="outline" disabled={isSyncing || !codeInput.trim()} className="h-10">
+              Salva
+            </Button>
+          </form>
 
           <Button
             onClick={onCloudSync}

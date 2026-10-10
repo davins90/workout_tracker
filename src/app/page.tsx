@@ -2,13 +2,10 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 import {
   WORKOUT_DAYS,
-  WorkoutDay,
   ExerciseHistoryMap,
   WeightHistoryEntry,
 } from "@/lib/workout-data";
@@ -17,28 +14,54 @@ import { FloatingRestTimer } from "@/components/FloatingRestTimer";
 import { ProgressCharts } from "@/components/ProgressCharts";
 import { SyncSettings } from "@/components/SyncSettings";
 import {
-  Activity,
   BarChart3,
   CheckCircle2,
   Clock,
-  Cloud,
+  CloudOff,
   Dumbbell,
+  Lock,
   RefreshCw,
   Settings2,
-  Sparkles,
-  Zap,
 } from "lucide-react";
 import { format } from "date-fns";
+import { historiesEqual, mergeHistories, sanitizeHistory } from "@/lib/history";
 
 const LOCAL_STORAGE_KEY = "workout_tracker_history_v3";
+const ACCESS_CODE_KEY = "workout_tracker_access_code";
 
-function playChimeSound() {
+export type SyncStatus = "loading" | "syncing" | "synced" | "pending" | "locked";
+
+function readLocalHistory(): ExerciseHistoryMap {
+  try {
+    const stored = window.localStorage.getItem(LOCAL_STORAGE_KEY);
+    return (stored && sanitizeHistory(JSON.parse(stored))) || {};
+  } catch (e) {
+    console.warn("Local storage parse error:", e);
+    return {};
+  }
+}
+
+// One shared audio context, created on a tap so mobile browsers allow the chime later
+let audioCtx: AudioContext | null = null;
+
+function unlockAudio() {
   try {
     const AudioContextClass =
       window.AudioContext ||
       (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass) return;
-    const ctx = new AudioContextClass();
+    if (!audioCtx) audioCtx = new AudioContextClass();
+    if (audioCtx.state === "suspended") void audioCtx.resume();
+  } catch (err) {
+    console.warn("Could not init audio:", err);
+  }
+}
+
+function playChimeSound() {
+  try {
+    unlockAudio();
+    const ctx = audioCtx;
+    if (!ctx) return;
 
     // Play double chime
     const playNote = (freq: number, start: number, duration: number) => {
@@ -56,6 +79,7 @@ function playChimeSound() {
 
     playNote(659.25, 0, 0.3); // E5
     playNote(880.0, 0.18, 0.45); // A5
+    navigator.vibrate?.([200, 100, 200]);
   } catch (err) {
     console.warn("Could not play sound:", err);
   }
@@ -65,9 +89,12 @@ export default function WorkoutTrackerApp() {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState<string>("scheda-a");
   const [history, setHistory] = useState<ExerciseHistoryMap>({});
-  const [isLoaded, setIsLoaded] = useState<boolean>(false);
-  const [isSyncing, setIsSyncing] = useState<boolean>(false);
-  const [lastSyncSource, setLastSyncSource] = useState<string>("local");
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("loading");
+  const [accessCode, setAccessCode] = useState<string>("");
+
+  // Latest values for async callbacks
+  const historyRef = useRef<ExerciseHistoryMap>({});
+  const accessCodeRef = useRef<string>("");
 
   // Floating Rest Timer State
   const [timerState, setTimerState] = useState<{
@@ -84,118 +111,173 @@ export default function WorkoutTrackerApp() {
     exerciseName: "",
   });
 
-  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // The countdown is derived from this end time, so it stays right after the tab was in background
+  const timerEndsAtRef = useRef<number | null>(null);
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
 
-  // Countdown effect
   useEffect(() => {
-    if (timerState.isRunning && timerState.timeLeft > 0) {
-      timerIntervalRef.current = setInterval(() => {
-        setTimerState((prev) => {
-          if (prev.timeLeft <= 1) {
-            playChimeSound();
-            return { ...prev, timeLeft: 0, isRunning: false };
-          }
-          return { ...prev, timeLeft: prev.timeLeft - 1 };
-        });
-      }, 1000);
-    } else {
-      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-    }
+    if (!timerState.isRunning) return;
+
+    const tick = () => {
+      const endsAt = timerEndsAtRef.current;
+      if (endsAt === null) return;
+      const left = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
+      if (left === 0) {
+        timerEndsAtRef.current = null;
+        playChimeSound();
+      }
+      setTimerState((prev) => ({ ...prev, timeLeft: left, isRunning: left > 0 }));
+    };
+
+    // Keep the screen on while resting, where the browser supports it
+    const requestWakeLock = async () => {
+      try {
+        if (document.visibilityState === "visible" && !wakeLockRef.current) {
+          wakeLockRef.current = (await navigator.wakeLock?.request("screen")) ?? null;
+          wakeLockRef.current?.addEventListener("release", () => {
+            wakeLockRef.current = null;
+          });
+        }
+      } catch {
+        // not supported or denied
+      }
+    };
+    const onVisibility = () => {
+      tick();
+      void requestWakeLock();
+    };
+
+    void requestWakeLock();
+    const interval = setInterval(tick, 250);
+    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
-      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+      void wakeLockRef.current?.release().catch(() => {});
+      wakeLockRef.current = null;
     };
-  }, [timerState.isRunning, timerState.timeLeft]);
+  }, [timerState.isRunning]);
 
-  // Load initial data from Cloud API + LocalStorage
-  useEffect(() => {
-    let localData: ExerciseHistoryMap = {};
+  const applyHistory = useCallback((next: ExerciseHistoryMap) => {
+    historyRef.current = next;
+    setHistory(next);
     try {
-      const stored = window.localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (stored) {
-        localData = JSON.parse(stored);
-        setHistory(localData);
-      }
-    } catch (e) {
-      console.warn("Local storage parse error:", e);
+      window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(next));
+    } catch (err) {
+      console.error("Local storage error:", err);
     }
-
-    // Fetch from Cloud API
-    fetch("/api/workout")
-      .then((res) => res.json())
-      .then((res) => {
-        if (res?.data && typeof res.data === "object") {
-          // Merge cloud data with local data
-          setHistory((prev) => {
-            const merged = { ...prev, ...res.data };
-            try {
-              window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(merged));
-            } catch (err) {
-              console.warn("Storage save err:", err);
-            }
-            return merged;
-          });
-          setLastSyncSource(res.source || "cloud");
-        }
-      })
-      .catch((err) => console.warn("Cloud sync fetch failed:", err))
-      .finally(() => setIsLoaded(true));
   }, []);
 
-  // Save changes to LocalStorage and Cloud
-  const persistHistory = useCallback(
-    async (updated: ExerciseHistoryMap) => {
-      setHistory(updated);
-      try {
-        window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-      } catch (err) {
-        console.error("Local storage error:", err);
-      }
+  const apiFetch = useCallback((init?: RequestInit) => {
+    return fetch("/api/workout", {
+      ...init,
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessCodeRef.current}`,
+      },
+    });
+  }, []);
 
-      setIsSyncing(true);
-      try {
-        const res = await fetch("/api/workout", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(updated),
-        });
-        const data = await res.json();
-        if (data.savedToCloud) {
-          setLastSyncSource("cloud");
-        }
-      } catch (err) {
-        console.warn("Could not save to Cloud API:", err);
-      } finally {
-        setIsSyncing(false);
+  // Sends the local history; the server merges it and returns the combined result
+  const pushHistory = useCallback(async (): Promise<boolean> => {
+    setSyncStatus("syncing");
+    try {
+      const res = await apiFetch({ method: "POST", body: JSON.stringify(historyRef.current) });
+      if (res.status === 401) {
+        setSyncStatus("locked");
+        return false;
       }
-    },
-    []
-  );
+      const body = await res.json();
+      const cloud = res.ok && body.success ? sanitizeHistory(body.data) : null;
+      if (!cloud) throw new Error(body.error || `HTTP ${res.status}`);
+      applyHistory(mergeHistories(cloud, historyRef.current));
+      setSyncStatus(historiesEqual(cloud, historyRef.current) ? "synced" : "pending");
+      return true;
+    } catch (err) {
+      console.warn("Could not save to Cloud API:", err);
+      setSyncStatus("pending");
+      return false;
+    }
+  }, [apiFetch, applyHistory]);
 
-  const handleSaveWeights = (exerciseName: string, series: (number | null)[]) => {
+  // Fetches the cloud history, merges it with the local one and uploads whatever the cloud is missing
+  const syncWithCloud = useCallback(async (): Promise<boolean> => {
+    setSyncStatus("syncing");
+    try {
+      const res = await apiFetch();
+      if (res.status === 401) {
+        setSyncStatus("locked");
+        return false;
+      }
+      const body = await res.json();
+      const cloud = res.ok ? sanitizeHistory(body.data) : null;
+      if (!cloud) throw new Error(body.error || `HTTP ${res.status}`);
+      applyHistory(mergeHistories(cloud, historyRef.current));
+      if (historiesEqual(cloud, historyRef.current)) {
+        setSyncStatus("synced");
+        return true;
+      }
+      return pushHistory();
+    } catch (err) {
+      console.warn("Cloud sync failed:", err);
+      setSyncStatus("pending");
+      return false;
+    }
+  }, [apiFetch, applyHistory, pushHistory]);
+
+  // Load local data first, then sync; retry when the connection or the tab comes back
+  useEffect(() => {
+    applyHistory(readLocalHistory());
+    try {
+      const code = window.localStorage.getItem(ACCESS_CODE_KEY) || "";
+      accessCodeRef.current = code;
+      setAccessCode(code);
+    } catch {
+      // storage unavailable
+    }
+    void syncWithCloud();
+
+    const retry = () => {
+      if (document.visibilityState === "visible" && navigator.onLine) void syncWithCloud();
+    };
+    window.addEventListener("online", retry);
+    document.addEventListener("visibilitychange", retry);
+    return () => {
+      window.removeEventListener("online", retry);
+      document.removeEventListener("visibilitychange", retry);
+    };
+  }, [applyHistory, syncWithCloud]);
+
+  const handleSaveWeights = (
+    exerciseName: string,
+    series: (number | null)[],
+    reps: (number | null)[]
+  ) => {
     const todayStr = format(new Date(), "yyyy-MM-dd");
-    const updated: ExerciseHistoryMap = { ...history };
-    const currentList = updated[exerciseName] ? [...updated[exerciseName]] : [];
-
     const newEntry: WeightHistoryEntry = {
       data: todayStr,
       serie: series,
+      reps,
+      ts: Date.now(),
     };
 
-    // If already saved today, replace the entry for today; otherwise prepend or append
-    const todayIndex = currentList.findIndex((item) => item.data === todayStr);
-    if (todayIndex >= 0) {
-      currentList[todayIndex] = newEntry;
-    } else {
-      currentList.push(newEntry);
-    }
+    // One entry per exercise per day: today's entry replaces the previous one
+    applyHistory(mergeHistories(historyRef.current, { [exerciseName]: [newEntry] }));
+    void pushHistory();
+  };
 
-    updated[exerciseName] = currentList;
-    persistHistory(updated);
+  // Latest recorded entry for an exercise name (the card asks for its active variant)
+  const getLatestEntry = (exerciseName: string): WeightHistoryEntry | undefined => {
+    const entries = history[exerciseName] || [];
+    return entries.length > 0 ? entries[entries.length - 1] : undefined;
   };
 
   // Timer controls
   const handleStartTimer = (seconds: number, exerciseName: string) => {
+    unlockAudio();
+    timerEndsAtRef.current = Date.now() + seconds * 1000;
     setTimerState({
       visible: true,
       initialSeconds: seconds,
@@ -206,10 +288,19 @@ export default function WorkoutTrackerApp() {
   };
 
   const handleTogglePlay = () => {
-    setTimerState((prev) => ({ ...prev, isRunning: !prev.isRunning }));
+    unlockAudio();
+    if (timerState.isRunning) {
+      timerEndsAtRef.current = null;
+      setTimerState((prev) => ({ ...prev, isRunning: false }));
+      return;
+    }
+    const seconds = timerState.timeLeft > 0 ? timerState.timeLeft : timerState.initialSeconds;
+    timerEndsAtRef.current = Date.now() + seconds * 1000;
+    setTimerState((prev) => ({ ...prev, timeLeft: seconds, isRunning: true }));
   };
 
   const handleResetTimer = () => {
+    timerEndsAtRef.current = null;
     setTimerState((prev) => ({
       ...prev,
       timeLeft: prev.initialSeconds,
@@ -218,48 +309,66 @@ export default function WorkoutTrackerApp() {
   };
 
   const handleAddSeconds = (secs: number) => {
-    setTimerState((prev) => ({
-      ...prev,
-      timeLeft: prev.timeLeft + secs,
-    }));
+    unlockAudio();
+    if (timerState.isRunning && timerEndsAtRef.current !== null) {
+      timerEndsAtRef.current += secs * 1000;
+      setTimerState((prev) => ({ ...prev, timeLeft: prev.timeLeft + secs }));
+    } else if (timerState.timeLeft === 0) {
+      // Finished: the extra time starts right away
+      timerEndsAtRef.current = Date.now() + secs * 1000;
+      setTimerState((prev) => ({ ...prev, timeLeft: secs, isRunning: true }));
+    } else {
+      setTimerState((prev) => ({ ...prev, timeLeft: prev.timeLeft + secs }));
+    }
   };
 
   const handleCloseTimer = () => {
+    timerEndsAtRef.current = null;
     setTimerState((prev) => ({ ...prev, visible: false, isRunning: false }));
   };
 
   // Manual cloud sync
   const handleManualSync = async () => {
-    setIsSyncing(true);
-    try {
-      const res = await fetch("/api/workout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(history),
-      });
-      const data = await res.json();
-      if (data.success) {
-        toast({
-          title: "Sincronizzazione completata!",
-          description: data.savedToCloud
-            ? "Dati salvati sul Cloud Storage Google."
-            : "Dati salvati in locale.",
-        });
-        setLastSyncSource(data.savedToCloud ? "cloud" : "local");
-      }
-    } catch (err) {
+    const ok = await syncWithCloud();
+    if (ok) {
       toast({
-        title: "Errore sincronizzazione",
-        description: String(err),
+        title: "Sincronizzazione completata!",
+        description: "Dati salvati sul Cloud Storage Google.",
+      });
+    } else {
+      toast({
+        title: "Sincronizzazione non riuscita",
+        description: accessCodeRef.current
+          ? "I dati restano su questo dispositivo: riprova quando hai connessione."
+          : "Inserisci il codice di accesso per sincronizzare.",
         variant: "destructive",
       });
-    } finally {
-      setIsSyncing(false);
     }
   };
 
-  const handleImportBackup = (newHistory: ExerciseHistoryMap) => {
-    persistHistory(newHistory);
+  const handleSaveAccessCode = async (code: string) => {
+    accessCodeRef.current = code;
+    setAccessCode(code);
+    try {
+      window.localStorage.setItem(ACCESS_CODE_KEY, code);
+    } catch {
+      // storage unavailable
+    }
+    await handleManualSync();
+  };
+
+  // Imported entries are added to the existing history
+  const handleImportBackup = (imported: ExerciseHistoryMap) => {
+    applyHistory(mergeHistories(historyRef.current, imported));
+    void pushHistory();
+  };
+
+  const syncBadge: Record<SyncStatus, { label: string; icon: React.ReactNode }> = {
+    loading: { label: "Caricamento...", icon: <RefreshCw className="h-3 w-3 animate-spin text-primary" /> },
+    syncing: { label: "Sincronizzazione...", icon: <RefreshCw className="h-3 w-3 animate-spin text-primary" /> },
+    synced: { label: "Cloud Sync", icon: <CheckCircle2 className="h-3 w-3 text-emerald-500" /> },
+    pending: { label: "Non sincronizzato", icon: <CloudOff className="h-3 w-3 text-amber-500" /> },
+    locked: { label: "Codice richiesto", icon: <Lock className="h-3 w-3 text-amber-500" /> },
   };
 
   return (
@@ -276,7 +385,7 @@ export default function WorkoutTrackerApp() {
                 Workout Tracker
               </h1>
               <span className="text-[11px] text-muted-foreground font-medium">
-                Nuovo Programma A · B · C
+                Programma A · B
               </span>
             </div>
           </div>
@@ -284,19 +393,11 @@ export default function WorkoutTrackerApp() {
           <div className="flex items-center gap-2">
             <Badge
               variant="outline"
-              className="hidden sm:flex items-center gap-1 text-xs text-muted-foreground border-border"
+              onClick={() => syncStatus !== "synced" && setActiveTab("impostazioni")}
+              className="flex items-center gap-1 text-xs text-muted-foreground border-border whitespace-nowrap shrink-0"
             >
-              {isSyncing ? (
-                <>
-                  <RefreshCw className="h-3 w-3 animate-spin text-primary" />
-                  <span>Sincronizzazione...</span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="h-3 w-3 text-emerald-500" />
-                  <span>{lastSyncSource === "cloud" ? "Cloud Sync" : "Salvato"}</span>
-                </>
-              )}
+              {syncBadge[syncStatus].icon}
+              <span>{syncBadge[syncStatus].label}</span>
             </Badge>
           </div>
         </div>
@@ -306,7 +407,7 @@ export default function WorkoutTrackerApp() {
       <main className="flex-grow container mx-auto px-3 sm:px-6 py-5 max-w-4xl space-y-5">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-5">
           {/* Navigation Tabs */}
-          <TabsList className="grid grid-cols-5 w-full h-12 p-1 bg-muted/80 rounded-xl shadow-inner">
+          <TabsList className="grid grid-cols-4 w-full h-12 p-1 bg-muted/80 rounded-xl shadow-inner">
             <TabsTrigger value="scheda-a" className="rounded-lg text-xs sm:text-sm font-bold gap-1.5">
               <span className="sm:hidden">A</span>
               <span className="hidden sm:inline">Scheda A</span>
@@ -314,11 +415,6 @@ export default function WorkoutTrackerApp() {
             <TabsTrigger value="scheda-b" className="rounded-lg text-xs sm:text-sm font-bold gap-1.5">
               <span className="sm:hidden">B</span>
               <span className="hidden sm:inline">Scheda B</span>
-            </TabsTrigger>
-            <TabsTrigger value="scheda-c" className="rounded-lg text-xs sm:text-sm font-bold gap-1.5">
-              <span className="sm:hidden">C</span>
-              <span className="hidden sm:inline">Scheda C</span>
-              <Sparkles className="h-3 w-3 text-amber-500 hidden sm:inline" />
             </TabsTrigger>
             <TabsTrigger value="grafici" className="rounded-lg text-xs sm:text-sm font-bold gap-1.5">
               <BarChart3 className="h-4 w-4" />
@@ -330,9 +426,14 @@ export default function WorkoutTrackerApp() {
             </TabsTrigger>
           </TabsList>
 
-          {/* Schede A, B, C */}
+          {/* Schede A, B */}
           {WORKOUT_DAYS.map((day) => (
-            <TabsContent key={day.id} value={day.id} className="space-y-4 focus-visible:outline-none">
+            <TabsContent
+              key={day.id}
+              value={day.id}
+              forceMount
+              className="space-y-4 focus-visible:outline-none data-[state=inactive]:hidden"
+            >
               {/* Day Header Banner */}
               <div className="bg-card p-4 rounded-xl border border-border shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                 <div>
@@ -361,21 +462,15 @@ export default function WorkoutTrackerApp() {
 
               {/* Linear Exercises List */}
               <div className="space-y-3.5">
-                {day.esercizi.map((exercise) => {
-                  // Find the latest recorded entry for this exercise or its active variant
-                  const entries = history[exercise.nome] || [];
-                  const latestEntry = entries.length > 0 ? entries[entries.length - 1] : undefined;
-
-                  return (
-                    <WorkoutExerciseCard
-                      key={exercise.id}
-                      exercise={exercise}
-                      historyEntry={latestEntry}
-                      onSaveWeights={handleSaveWeights}
-                      onStartTimer={handleStartTimer}
-                    />
-                  );
-                })}
+                {day.esercizi.map((exercise) => (
+                  <WorkoutExerciseCard
+                    key={exercise.id}
+                    exercise={exercise}
+                    getLatestEntry={getLatestEntry}
+                    onSaveWeights={handleSaveWeights}
+                    onStartTimer={handleStartTimer}
+                  />
+                ))}
               </div>
             </TabsContent>
           ))}
@@ -391,8 +486,9 @@ export default function WorkoutTrackerApp() {
               history={history}
               onImport={handleImportBackup}
               onCloudSync={handleManualSync}
-              isSyncing={isSyncing}
-              lastSyncSource={lastSyncSource}
+              syncStatus={syncStatus}
+              accessCode={accessCode}
+              onSaveAccessCode={handleSaveAccessCode}
             />
           </TabsContent>
         </Tabs>

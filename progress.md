@@ -1,7 +1,7 @@
 # Progress Tracking: Workout Tracker (workout-tracker-uexmt)
 
 ## 📌 Panoramica del Progetto
-Applicazione web moderna per il tracciamento degli allenamenti, progressioni di carico e routine fitness (Scheda A, Scheda B, Scheda C, Grafici, Impostazioni).
+Applicazione web moderna per il tracciamento degli allenamenti, progressioni di carico e routine fitness (Scheda A, Scheda B, Grafici, Backup).
 
 ---
 
@@ -18,6 +18,9 @@ Applicazione web moderna per il tracciamento degli allenamenti, progressioni di 
 ---
 
 ## 📋 Prossimi Passi (To-Do)
-- [ ] Fare commit e push del codice Next.js sul repository GitHub per avere tutto salvato su Git.
-- [ ] Configurare eventuale CI/CD GitHub Actions simile a Eufemy per il deploy automatico su Cloud Run.
+- [x] Commit e push del codice Next.js su GitHub.
+- [x] CI/CD GitHub Actions con controlli (typecheck, test, build) e deploy su Cloud Run.
+- [x] API protetta da codice di accesso, sincronizzazione con unione dei dati, registrazione delle ripetizioni.
+- [ ] Login con Google (IAP) al posto del codice di accesso: richiede un client OAuth creato a mano in console.
+- [ ] Aggiornamento a una major di Next.js più recente (la linea 14.x ha avvisi di sicurezza aperti).
 - [ ] Pianificare la migrazione del servizio Cloud Run su `dani-lab-507314` (quando vorrai consolidare i progetti).

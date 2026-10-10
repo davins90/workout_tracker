@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -10,89 +10,135 @@ import { Exercise, WeightHistoryEntry } from "@/lib/workout-data";
 import {
   Activity,
   Check,
-  CheckCircle2,
-  Clock,
   Dumbbell,
-  Flame,
   Footprints,
   History,
-  RotateCcw,
   Save,
   Shield,
-  Snowflake,
   Timer,
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 
 interface WorkoutExerciseCardProps {
   exercise: Exercise;
-  historyEntry?: WeightHistoryEntry;
-  onSaveWeights: (exerciseName: string, series: (number | null)[]) => void;
+  getLatestEntry: (exerciseName: string) => WeightHistoryEntry | undefined;
+  onSaveWeights: (exerciseName: string, series: (number | null)[], reps: (number | null)[]) => void;
   onStartTimer: (seconds: number, exerciseName: string) => void;
+}
+
+const AUTOSAVE_DELAY_MS = 700;
+
+function toNumber(value: string): number | null {
+  const n = Number(value.replace(",", "."));
+  return value.trim() === "" || isNaN(n) || n < 0 ? null : n;
+}
+
+function formatSet(kg: number | null | undefined, reps: number | null | undefined): string {
+  return reps !== null && reps !== undefined ? `${kg ?? "–"}×${reps}` : `${kg}`;
 }
 
 export function WorkoutExerciseCard({
   exercise,
-  historyEntry,
+  getLatestEntry,
   onSaveWeights,
   onStartTimer,
 }: WorkoutExerciseCardProps) {
   const { toast } = useToast();
 
-  // Handle variants (e.g. Scheda C: Chest press vs Panca inclinata)
+  // Handle variants (e.g. Face pull vs Reverse fly)
   const [activeVariant, setActiveVariant] = useState<string>(
     exercise.varianti && exercise.varianti.length > 0 ? exercise.varianti[0] : exercise.nome
   );
 
   const currentExerciseName = activeVariant;
+  const historyEntry = getLatestEntry(currentExerciseName);
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const isTodayEntry = historyEntry?.data === todayStr;
 
-  // Local state for weights in current session
-  const [weights, setWeights] = useState<(string | number)[]>([]);
-  // Local state for completed sets checkmark
+  // Values typed in the current session
+  const [weights, setWeights] = useState<string[]>([]);
+  const [reps, setReps] = useState<string[]>([]);
   const [completedSets, setCompletedSets] = useState<boolean[]>([]);
 
+  // Once the user has typed something, history updates must not overwrite it
+  const dirtyRef = useRef(false);
+  const loadedVariantRef = useRef(activeVariant);
+  const onSaveRef = useRef(onSaveWeights);
+  onSaveRef.current = onSaveWeights;
+
   useEffect(() => {
-    const totalSets = exercise.serie;
-    const existingSeries = historyEntry?.serie || [];
-    setWeights(
-      Array(totalSets)
-        .fill("")
-        .map((_, i) =>
-          existingSeries[i] !== null && existingSeries[i] !== undefined
-            ? existingSeries[i]!
-            : ""
-        )
-    );
-    setCompletedSets(Array(totalSets).fill(false));
-  }, [historyEntry, exercise.serie, activeVariant]);
+    if (loadedVariantRef.current !== activeVariant) {
+      loadedVariantRef.current = activeVariant;
+      dirtyRef.current = false;
+    }
+    if (dirtyRef.current) return;
+
+    const lastSeries = historyEntry?.serie || [];
+    // Same exercise can have a different number of sets in another day: reuse the last known weight
+    const fallback = [...lastSeries].reverse().find((v) => v !== null && v !== undefined);
+    const todayReps = isTodayEntry ? historyEntry?.reps || [] : [];
+    const sets = Array.from({ length: exercise.serie });
+
+    setWeights(sets.map((_, i) => String(lastSeries[i] ?? fallback ?? "")));
+    setReps(sets.map((_, i) => String(todayReps[i] ?? "")));
+    setCompletedSets(sets.map((_, i) => todayReps[i] !== null && todayReps[i] !== undefined));
+  }, [historyEntry, isTodayEntry, exercise.serie, activeVariant]);
+
+  // Sets that are ticked or have reps typed in count as done; the rest is not written to history
+  const buildEntry = (onlyDone: boolean) => {
+    const include = (i: number) => !onlyDone || completedSets[i] || toNumber(reps[i] ?? "") !== null;
+    return {
+      serie: weights.map((w, i) => (include(i) ? toNumber(w) : null)),
+      reps: reps.map((r, i) => (include(i) ? toNumber(r) : null)),
+    };
+  };
+
+  // Autosave shortly after each change, so nothing depends on pressing "Salva"
+  useEffect(() => {
+    if (!dirtyRef.current) return;
+    const timeout = setTimeout(() => {
+      const entry = buildEntry(true);
+      if (entry.serie.every((v) => v === null) && entry.reps.every((v) => v === null)) return;
+      onSaveRef.current(currentExerciseName, entry.serie, entry.reps);
+    }, AUTOSAVE_DELAY_MS);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weights, reps, completedSets]);
 
   const handleWeightChange = (index: number, val: string) => {
-    const updated = [...weights];
-    updated[index] = val;
-    setWeights(updated);
+    dirtyRef.current = true;
+    setWeights((prev) => prev.map((w, i) => (i === index ? val : w)));
+  };
+
+  const handleRepsChange = (index: number, val: string) => {
+    dirtyRef.current = true;
+    setReps((prev) => prev.map((r, i) => (i === index ? val : r)));
   };
 
   const toggleSetComplete = (index: number) => {
-    const updated = [...completedSets];
-    updated[index] = !updated[index];
-    setCompletedSets(updated);
+    dirtyRef.current = true;
+    const nowDone = !completedSets[index];
+    setCompletedSets((prev) => prev.map((done, i) => (i === index ? nowDone : done)));
 
     // If marked complete and was not complete before, start timer!
-    if (updated[index] && exercise.recupero > 0) {
+    if (nowDone && exercise.recupero > 0) {
       onStartTimer(exercise.recupero, `${currentExerciseName} (Set ${index + 1})`);
     }
   };
 
   const handleSave = () => {
-    const parsedSeries = weights.map((w) =>
-      w === "" || isNaN(Number(w)) ? null : Number(w)
-    );
-    onSaveWeights(currentExerciseName, parsedSeries);
+    const entry = buildEntry(false);
+    onSaveWeights(currentExerciseName, entry.serie, entry.reps);
     toast({
-      title: "Pesi salvati!",
-      description: `Carichi aggiornati per ${currentExerciseName}.`,
+      title: "Sessione salvata!",
+      description: `Carichi e ripetizioni aggiornati per ${currentExerciseName}.`,
     });
   };
+
+  const previousReps = isTodayEntry ? [] : historyEntry?.reps || [];
+  const lastSets = (historyEntry?.serie || [])
+    .map((kg, i) => ({ kg, reps: historyEntry?.reps?.[i] }))
+    .filter((set) => set.kg !== null && set.kg > 0);
 
   // Format last update date
   let formattedDate = "Mai registrato";
@@ -136,6 +182,11 @@ export function WorkoutExerciseCard({
               <Badge variant="secondary" className="text-xs font-normal">
                 {exercise.gruppo}
               </Badge>
+              {exercise.superserie && (
+                <Badge variant="outline" className="text-xs text-primary border-primary/40 bg-primary/10">
+                  Superserie con {exercise.superserie}
+                </Badge>
+              )}
               {exercise.opzionale && (
                 <Badge variant="outline" className="text-xs text-amber-600 border-amber-500/40 bg-amber-500/10">
                   Opzionale
@@ -188,9 +239,9 @@ export function WorkoutExerciseCard({
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground pt-1.5">
           <History className="h-3 w-3" />
           <span>Ultimo carico registrato: {formattedDate}</span>
-          {historyEntry?.serie && historyEntry.serie.some((s) => s !== null && s > 0) && (
+          {lastSets.length > 0 && (
             <span className="font-mono text-foreground font-semibold ml-1">
-              ({historyEntry.serie.filter((s) => s !== null && s > 0).join(" - ")} kg)
+              ({lastSets.map((set) => formatSet(set.kg, set.reps)).join(" - ")} kg)
             </span>
           )}
         </div>
@@ -230,18 +281,31 @@ export function WorkoutExerciseCard({
                   </span>
                 </div>
 
-                {/* Weight input */}
-                <div className="flex items-center gap-2 w-32 sm:w-36">
+                {/* Weight and reps inputs */}
+                <div className="flex items-center gap-1.5">
                   <Input
                     type="number"
+                    inputMode="decimal"
                     step="0.5"
                     min="0"
                     placeholder="0.0"
+                    aria-label={`Peso set ${idx + 1}`}
                     value={weights[idx] ?? ""}
                     onChange={(e) => handleWeightChange(idx, e.target.value)}
-                    className="h-9 text-right font-mono font-semibold"
+                    className="h-9 w-[4.5rem] text-right font-mono font-semibold"
                   />
-                  <span className="text-xs text-muted-foreground font-medium">kg</span>
+                  <span className="text-xs text-muted-foreground font-medium">kg ×</span>
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    step="1"
+                    min="0"
+                    placeholder={String(previousReps[idx] ?? "rip.")}
+                    aria-label={`Ripetizioni set ${idx + 1}`}
+                    value={reps[idx] ?? ""}
+                    onChange={(e) => handleRepsChange(idx, e.target.value)}
+                    className="h-9 w-16 text-right font-mono font-semibold"
+                  />
                 </div>
               </div>
             );
@@ -255,7 +319,7 @@ export function WorkoutExerciseCard({
           className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-medium h-10 flex items-center justify-center gap-2 shadow-sm"
         >
           <Save className="h-4 w-4" />
-          <span>Salva Pesi Sessione</span>
+          <span>Salva Sessione</span>
         </Button>
       </CardFooter>
     </Card>

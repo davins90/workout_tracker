@@ -37,3 +37,6 @@ __pycache__/
 *.pyc
 venv/
 .venv/
+
+# local dev data
+/data/workout_history.json

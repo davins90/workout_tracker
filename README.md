@@ -1,46 +1,41 @@
 # Workout Tracker WebApp
 
-Applicazione web moderna sviluppata con Next.js (App Router), React, Tailwind CSS, Radix UI e Lucide Icons, portata da Google AI Studio a Cloud Shell.
+Applicazione web per tracciare gli allenamenti, sviluppata con Next.js 14 (App Router), React, Tailwind CSS e Radix UI. Gira su Cloud Run (`europe-west8`) e salva lo storico su Cloud Storage.
 
 ## Funzionalità
-- **Schede di allenamento suddivise**:
-  - `UPPER A — Push Emphasis`
-  - `UPPER B — Pull Emphasis`
-  - `LOWER A — Quad & Glutei`
-  - `LOWER B — Posterior Chain`
-- **Fasi guidate**:
-  - Riscaldamento specifico con dettagli per ciascuna sessione
-  - Esercizi con serie, ripetizioni consigliate e indicazioni Superset
-  - Defaticamento e stretching mirato
-- **Tracking carichi (kg)**:
-  - Input per ogni serie
-  - Data dell'ultimo aggiornamento per ciascun esercizio
-  - Salvataggio persistente in `localStorage`
-  - Notifiche toast di conferma
-- **Timer di recupero (Rest Timer)**:
-  - Popover con display digitale mm:ss
-  - Avvio / Pausa / Reset
-  - Segnale acustico alla conclusione del recupero tramite Web Audio API
-- **Design responsive**:
-  - Ottimizzato per mobile e desktop
-  - Palette colori e componenti UI basati sullo standard shadcn/ui
+- **Due schede full-body con focus sulla parte alta** (`src/lib/workout-data.ts`):
+  - `A — Upper + Leg press`
+  - `B — Upper + Stacco rumeno`
+- **Superserie**: gli esercizi in coppia sono etichettati e il timer parte dopo il secondo.
+- **Tracking di carichi e ripetizioni** per ogni serie, con salvataggio automatico.
+- **Varianti** di esercizio con storico separato (es. Face pull / Reverse fly).
+- **Timer di recupero** basato sull'orario di fine, con suono, vibrazione e schermo tenuto acceso dove supportato.
+- **Grafici** di progressione del carico massimo per esercizio.
+- **Sincronizzazione**: i dati restano sul dispositivo (`localStorage`) e vengono uniti a quelli nel cloud, una voce per esercizio per giorno; a parità di giorno vince la modifica più recente.
+- **Backup** manuale: esportazione e importazione in JSON.
 
-## Avvio in Locale
+## API
+`GET` e `POST /api/workout` richiedono l'header `Authorization: Bearer <codice>`.
 
-1. Installa le dipendenze:
-   ```bash
-   npm install
-   ```
+| Variabile | Uso |
+| :--- | :--- |
+| `APP_ACCESS_CODE` | Codice di accesso. Obbligatorio in produzione (su Cloud Run arriva dal secret `workout-access-code`). |
+| `GCS_BUCKET_NAME` | Bucket dello storico. Default: `workout-tracker-uexmt-data`. |
 
-2. Avvia il server di sviluppo:
-   ```bash
-   npm run dev
-   ```
+In sviluppo, senza credenziali Google, lo storico viene salvato in `data/workout_history.json`.
 
-3. Apri l'anteprima web sulla porta 3000 (tramite la funzione "Web Preview" di Cloud Shell).
-
-## Build di produzione
+## Avvio in locale
 ```bash
-npm run build
-npm start
+npm install
+npm run dev
 ```
+
+## Controlli
+```bash
+npm run typecheck
+npm test
+npm run build
+```
+
+## Deploy
+Ogni push su `main` esegue i controlli e poi il deploy su Cloud Run (`.github/workflows/deploy.yml`). L'autenticazione verso Google Cloud usa Workload Identity Federation, senza chiavi salvate nei secret di GitHub.

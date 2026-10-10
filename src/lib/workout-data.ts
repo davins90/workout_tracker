@@ -7,6 +7,7 @@ export interface Exercise {
   recupero: number; // in seconds
   opzionale?: boolean;
   varianti?: string[]; // If alternative exercises can be chosen
+  superserie?: string; // Name of the exercise this one is paired with (rest only after the pair)
 }
 
 export interface WorkoutDay {
@@ -19,7 +20,9 @@ export interface WorkoutDay {
 
 export interface WeightHistoryEntry {
   data: string; // "yyyy-MM-dd"
-  serie: (number | null)[];
+  serie: (number | null)[]; // kg per set
+  reps?: (number | null)[]; // repetitions per set
+  ts?: number; // last edit time (ms), used to resolve sync conflicts
 }
 
 // Exercise history format: exerciseName -> WeightHistoryEntry[]
@@ -29,9 +32,9 @@ export type ExerciseHistoryMap = Record<string, WeightHistoryEntry[]>;
 export const WORKOUT_DAYS: WorkoutDay[] = [
   {
     id: "scheda-a",
-    titolo: "A — Chest & Glutes",
+    titolo: "A — Upper + Leg press",
     tipo: "base",
-    durataStimata: "40–45 min",
+    durataStimata: "≈50 min",
     esercizi: [
       {
         id: "panca_inclinata_multi",
@@ -39,6 +42,14 @@ export const WORKOUT_DAYS: WorkoutDay[] = [
         gruppo: "Petto",
         serie: 4,
         repsTarget: "6–10",
+        recupero: 105,
+      },
+      {
+        id: "chest_press_a",
+        nome: "Chest press",
+        gruppo: "Petto",
+        serie: 2,
+        repsTarget: "8–12",
         recupero: 90,
       },
       {
@@ -50,44 +61,59 @@ export const WORKOUT_DAYS: WorkoutDay[] = [
         recupero: 90,
       },
       {
-        id: "hip_thrust_a",
-        nome: "Hip thrust",
-        gruppo: "Glutei",
+        id: "leg_press",
+        nome: "Leg press",
+        gruppo: "Gambe",
         serie: 3,
         repsTarget: "8–12",
-        recupero: 90,
+        recupero: 0,
+        superserie: "Calf press",
       },
       {
-        id: "leg_extension",
-        nome: "Leg extension",
-        gruppo: "Gambe",
-        serie: 2,
+        id: "calf_press",
+        nome: "Calf press",
+        gruppo: "Polpacci",
+        serie: 3,
         repsTarget: "10–15",
-        recupero: 60,
+        recupero: 90,
+        superserie: "Leg press",
       },
       {
         id: "alzate_laterali_a",
         nome: "Alzate laterali",
         gruppo: "Spalle",
-        serie: 3,
+        serie: 4,
         repsTarget: "12–20",
-        recupero: 60,
+        recupero: 0,
+        superserie: "Curl inclinato / manubri",
       },
       {
         id: "curl_inclinato",
         nome: "Curl inclinato / manubri",
         gruppo: "Bicipiti",
-        serie: 2,
+        serie: 4,
         repsTarget: "8–12",
         recupero: 60,
+        superserie: "Alzate laterali",
+      },
+      {
+        id: "reverse_fly_or_facepull",
+        nome: "Face pull al cavo",
+        varianti: ["Face pull al cavo", "Reverse fly alla pec deck"],
+        gruppo: "Deltoidi Post",
+        serie: 2,
+        repsTarget: "12–20",
+        recupero: 0,
+        superserie: "Pushdown tricipiti",
       },
       {
         id: "pushdown_tricipiti_a",
         nome: "Pushdown tricipiti",
         gruppo: "Tricipiti",
-        serie: 2,
+        serie: 4,
         repsTarget: "10–15",
         recupero: 60,
+        superserie: "Face pull al cavo",
       },
       {
         id: "crunch_macchina",
@@ -102,25 +128,17 @@ export const WORKOUT_DAYS: WorkoutDay[] = [
   },
   {
     id: "scheda-b",
-    titolo: "B — Back & Arms",
+    titolo: "B — Upper + Stacco rumeno",
     tipo: "base",
-    durataStimata: "40–45 min",
+    durataStimata: "≈50 min",
     esercizi: [
-      {
-        id: "romanian_deadlift",
-        nome: "Romanian deadlift",
-        gruppo: "Femorali/Glutei",
-        serie: 2,
-        repsTarget: "6–10",
-        recupero: 120,
-      },
       {
         id: "chest_press_b",
         nome: "Chest press",
         gruppo: "Petto",
         serie: 4,
         repsTarget: "8–12",
-        recupero: 90,
+        recupero: 105,
       },
       {
         id: "pulley_seated_row",
@@ -131,118 +149,48 @@ export const WORKOUT_DAYS: WorkoutDay[] = [
         recupero: 90,
       },
       {
-        id: "leg_curl_seduto",
-        nome: "Leg curl seduto",
-        gruppo: "Femorali",
-        serie: 2,
-        repsTarget: "10–15",
-        recupero: 60,
+        id: "romanian_deadlift",
+        nome: "Romanian deadlift",
+        gruppo: "Femorali/Glutei",
+        serie: 3,
+        repsTarget: "6–10",
+        recupero: 120,
       },
       {
         id: "alzate_laterali_b",
         nome: "Alzate laterali",
         gruppo: "Spalle",
-        serie: 3,
+        serie: 4,
         repsTarget: "12–20",
-        recupero: 60,
+        recupero: 0,
+        superserie: "Hammer curl",
       },
       {
         id: "hammer_curl",
         nome: "Hammer curl",
         gruppo: "Bicipiti/Brachiale",
-        serie: 2,
+        serie: 4,
         repsTarget: "8–12",
         recupero: 60,
-      },
-      {
-        id: "estensioni_tricipiti_overhead",
-        nome: "Estensioni tricipiti sopra testa",
-        gruppo: "Tricipiti",
-        serie: 2,
-        repsTarget: "10–15",
-        recupero: 60,
+        superserie: "Alzate laterali",
       },
       {
         id: "reverse_curl_b",
         nome: "Reverse curl",
         gruppo: "Avambracci/Brachioradiale",
-        serie: 2,
+        serie: 3,
         repsTarget: "10–15",
-        recupero: 60,
-      },
-    ],
-  },
-  {
-    id: "scheda-c",
-    titolo: "C — Upper Aesthetics",
-    tipo: "bonus",
-    durataStimata: "35–40 min",
-    esercizi: [
-      {
-        id: "chest_or_incline",
-        nome: "Chest press",
-        varianti: ["Chest press", "Panca inclinata"],
-        gruppo: "Petto",
-        serie: 3,
-        repsTarget: "8–12",
-        recupero: 90,
+        recupero: 0,
+        superserie: "Estensioni tricipiti sopra testa",
       },
       {
-        id: "lat_machine_neutra",
-        nome: "Lat machine presa neutra",
-        gruppo: "Dorso",
-        serie: 3,
-        repsTarget: "8–12",
-        recupero: 90,
-      },
-      {
-        id: "hip_thrust_c",
-        nome: "Hip thrust",
-        gruppo: "Glutei",
-        serie: 3,
-        repsTarget: "8–12",
-        recupero: 90,
-      },
-      {
-        id: "alzate_laterali_c",
-        nome: "Alzate laterali",
-        gruppo: "Spalle",
-        serie: 3,
-        repsTarget: "12–20",
-        recupero: 60,
-      },
-      {
-        id: "reverse_fly_or_facepull",
-        nome: "Reverse fly alla pec deck",
-        varianti: ["Reverse fly alla pec deck", "Face pull al cavo"],
-        gruppo: "Deltoidi Post",
-        serie: 2,
-        repsTarget: "12–20",
-        recupero: 60,
-      },
-      {
-        id: "curl_bicipiti_c",
-        nome: "Curl bicipiti",
-        gruppo: "Bicipiti",
-        serie: 2,
-        repsTarget: "8–12",
-        recupero: 60,
-      },
-      {
-        id: "pushdown_tricipiti_c",
-        nome: "Pushdown tricipiti",
+        id: "estensioni_tricipiti_overhead",
+        nome: "Estensioni tricipiti sopra testa",
         gruppo: "Tricipiti",
-        serie: 2,
+        serie: 4,
         repsTarget: "10–15",
         recupero: 60,
-      },
-      {
-        id: "reverse_curl_c",
-        nome: "Reverse curl",
-        gruppo: "Avambracci",
-        serie: 2,
-        repsTarget: "10–15",
-        recupero: 60,
+        superserie: "Reverse curl",
       },
     ],
   },

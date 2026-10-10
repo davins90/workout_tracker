@@ -3,8 +3,6 @@
 import React, { useState, useMemo } from "react";
 import {
   ResponsiveContainer,
-  LineChart,
-  Line,
   XAxis,
   YAxis,
   Tooltip,
@@ -55,7 +53,10 @@ export function ProgressCharts({ history }: { history: ExerciseHistoryMap }) {
       .map((entry) => {
         const validSeries = entry.serie.filter((s): s is number => s !== null && s > 0);
         const maxWeight = validSeries.length > 0 ? Math.max(...validSeries) : 0;
-        const totalVolume = validSeries.reduce((acc, curr) => acc + curr, 0);
+        const setLabels = entry.serie
+          .map((kg, i) => ({ kg, reps: entry.reps?.[i] }))
+          .filter((set) => set.kg !== null && set.kg > 0)
+          .map((set) => (set.reps !== null && set.reps !== undefined ? `${set.kg}×${set.reps}` : `${set.kg}`));
         let displayDate = entry.data;
         try {
           displayDate = format(parseISO(entry.data), "dd/MM");
@@ -66,8 +67,7 @@ export function ProgressCharts({ history }: { history: ExerciseHistoryMap }) {
           rawDate: entry.data,
           displayDate,
           maxWeight,
-          totalVolume,
-          serieStr: validSeries.join(" - ") + " kg",
+          serieStr: setLabels.join(" - ") + " kg",
         };
       })
       .sort((a, b) => a.rawDate.localeCompare(b.rawDate));
