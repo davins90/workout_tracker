@@ -15,7 +15,7 @@ Applicazione web per tracciare gli allenamenti, sviluppata con Next.js 14 (App R
 - **Backup** manuale: esportazione e importazione in JSON.
 
 ## Accesso
-Il servizio è dietro Identity-Aware Proxy: si entra con il login Google e solo gli account autorizzati passano. L'API verifica l'identità firmata da IAP (header `x-goog-iap-jwt-assertion`); in alternativa accetta `Authorization: Bearer <codice>`.
+Il servizio è dietro Identity-Aware Proxy: si entra con il login Google e solo gli account autorizzati passano. L'API verifica l'identità firmata da IAP (header `x-goog-iap-jwt-assertion`); in alternativa accetta l'header `X-Access-Code: <codice>` (non `Authorization`, che IAP interpreta come proprio token e rifiuta).
 
 | Variabile | Uso |
 | :--- | :--- |

@@ -55,8 +55,7 @@ async function checkAccess(req: NextRequest): Promise<NextResponse | null> {
     if (!IS_PRODUCTION) return null;
     return NextResponse.json({ error: "Accesso non configurato sul server" }, { status: 503 });
   }
-  const header = req.headers.get("authorization") || "";
-  const provided = header.startsWith("Bearer ") ? header.slice(7) : "";
+  const provided = req.headers.get("x-access-code") || "";
   if (!provided || !timingSafeEqual(digest(provided), digest(expected))) {
     return NextResponse.json({ error: "Codice di accesso mancante o errato" }, { status: 401 });
   }

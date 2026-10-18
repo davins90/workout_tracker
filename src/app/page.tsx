@@ -173,9 +173,10 @@ export default function WorkoutTrackerApp() {
     return fetch("/api/workout", {
       ...init,
       cache: "no-store",
+      // Not the Authorization header: IAP reads that one as its own token and rejects the request
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${accessCodeRef.current}`,
+        ...(accessCodeRef.current ? { "X-Access-Code": accessCodeRef.current } : {}),
       },
     });
   }, []);
