@@ -14,7 +14,7 @@ interface SyncSettingsProps {
   history: ExerciseHistoryMap;
   onImport: (newHistory: ExerciseHistoryMap) => void;
   onCloudSync: () => Promise<void>;
-  syncStatus: "loading" | "syncing" | "synced" | "pending" | "locked";
+  syncStatus: "loading" | "syncing" | "synced" | "pending" | "locked" | "expired";
   accessCode: string;
   onSaveAccessCode: (code: string) => Promise<void>;
 }
@@ -25,6 +25,7 @@ const STATUS_LABELS: Record<SyncSettingsProps["syncStatus"], string> = {
   synced: "Sincronizzato con il cloud",
   pending: "Solo su questo dispositivo (da sincronizzare)",
   locked: "Codice di accesso richiesto",
+  expired: "Accesso Google scaduto: tocca Riaccedi in alto",
 };
 
 export function SyncSettings({

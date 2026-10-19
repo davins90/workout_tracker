@@ -17,6 +17,7 @@ Applicazione web moderna per il tracciamento degli allenamenti, progressioni di 
 - [x] **Accesso**: Identity-Aware Proxy con login Google; autorizzato solo `daniele.davino12@gmail.com`. Client OAuth personalizzato (file in `~/.keys/workout-tracker-iap-oauth.json`, fuori dal repository). Codice di accesso di riserva nel secret `workout-access-code`.
 - [x] **Dati**: bucket `workout-tracker-uexmt-data` (europe-west8, versioning attivo), file `data/workout_history.json`.
 - [x] **Deploy**: GitHub Actions a ogni push su `main` (typecheck, test, build, poi deploy), autenticazione con Workload Identity Federation, nessuna chiave salvata.
+- [x] **App installabile (PWA, 19/10/2026)**: manifest, icone e service worker (`public/sw.js`). Si installa da Chrome sul telefono con "Installa app". Il service worker salva la pagina e i file della build, così l'app si apre anche con poco segnale; non salva mai l'API né i passaggi del login. Quando il login Google scade, l'API riceve 401 da IAP (grazie all'header `X-Requested-With`) e l'app mostra il pulsante "Riaccedi", che fa partire un login nuovo da `/`. Così si evita l'errore IAP 9, che nasce quando un login lasciato a metà viene ripreso dopo più di 10 minuti.
 - [x] **Archivio Prototipo**: il vecchio codice Streamlit è in `old_streamlit_prototype/`.
 
 ---

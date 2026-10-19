@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 import {
   WORKOUT_DAYS,
@@ -20,6 +21,7 @@ import {
   CloudOff,
   Dumbbell,
   Lock,
+  LogIn,
   RefreshCw,
   Settings2,
 } from "lucide-react";
@@ -29,7 +31,7 @@ import { historiesEqual, mergeHistories, sanitizeHistory } from "@/lib/history";
 const LOCAL_STORAGE_KEY = "workout_tracker_history_v3";
 const ACCESS_CODE_KEY = "workout_tracker_access_code";
 
-export type SyncStatus = "loading" | "syncing" | "synced" | "pending" | "locked";
+export type SyncStatus = "loading" | "syncing" | "synced" | "pending" | "locked" | "expired";
 
 function readLocalHistory(): ExerciseHistoryMap {
   try {
@@ -39,6 +41,12 @@ function readLocalHistory(): ExerciseHistoryMap {
     console.warn("Local storage parse error:", e);
     return {};
   }
+}
+
+// 401 from IAP (Google login expired) or from the app (access code missing or wrong)
+function unauthorizedStatus(res: Response): SyncStatus | null {
+  if (res.status !== 401) return null;
+  return res.headers.get("x-goog-iap-generated-response") === "true" ? "expired" : "locked";
 }
 
 // One shared audio context, created on a tap so mobile browsers allow the chime later
@@ -94,6 +102,7 @@ export default function WorkoutTrackerApp() {
 
   // Latest values for async callbacks
   const historyRef = useRef<ExerciseHistoryMap>({});
+  const syncStatusRef = useRef<SyncStatus>("loading");
   const accessCodeRef = useRef<string>("");
 
   // Floating Rest Timer State
@@ -169,6 +178,11 @@ export default function WorkoutTrackerApp() {
     }
   }, []);
 
+  const setStatus = useCallback((status: SyncStatus) => {
+    syncStatusRef.current = status;
+    setSyncStatus(status);
+  }, []);
+
   const apiFetch = useCallback((init?: RequestInit) => {
     return fetch("/api/workout", {
       ...init,
@@ -176,6 +190,8 @@ export default function WorkoutTrackerApp() {
       // Not the Authorization header: IAP reads that one as its own token and rejects the request
       headers: {
         "Content-Type": "application/json",
+        // With this header an expired Google login answers 401 instead of redirecting to the login page
+        "X-Requested-With": "XMLHttpRequest",
         ...(accessCodeRef.current ? { "X-Access-Code": accessCodeRef.current } : {}),
       },
     });
@@ -183,33 +199,35 @@ export default function WorkoutTrackerApp() {
 
   // Sends the local history; the server merges it and returns the combined result
   const pushHistory = useCallback(async (): Promise<boolean> => {
-    setSyncStatus("syncing");
+    setStatus("syncing");
     try {
       const res = await apiFetch({ method: "POST", body: JSON.stringify(historyRef.current) });
-      if (res.status === 401) {
-        setSyncStatus("locked");
+      const denied = unauthorizedStatus(res);
+      if (denied) {
+        setStatus(denied);
         return false;
       }
       const body = await res.json();
       const cloud = res.ok && body.success ? sanitizeHistory(body.data) : null;
       if (!cloud) throw new Error(body.error || `HTTP ${res.status}`);
       applyHistory(mergeHistories(cloud, historyRef.current));
-      setSyncStatus(historiesEqual(cloud, historyRef.current) ? "synced" : "pending");
+      setStatus(historiesEqual(cloud, historyRef.current) ? "synced" : "pending");
       return true;
     } catch (err) {
       console.warn("Could not save to Cloud API:", err);
-      setSyncStatus("pending");
+      setStatus("pending");
       return false;
     }
-  }, [apiFetch, applyHistory]);
+  }, [apiFetch, applyHistory, setStatus]);
 
   // Fetches the cloud history, merges it with the local one and uploads whatever the cloud is missing
   const syncWithCloud = useCallback(async (): Promise<boolean> => {
-    setSyncStatus("syncing");
+    setStatus("syncing");
     try {
       const res = await apiFetch();
-      if (res.status === 401) {
-        setSyncStatus("locked");
+      const denied = unauthorizedStatus(res);
+      if (denied) {
+        setStatus(denied);
         return false;
       }
       const body = await res.json();
@@ -217,16 +235,16 @@ export default function WorkoutTrackerApp() {
       if (!cloud) throw new Error(body.error || `HTTP ${res.status}`);
       applyHistory(mergeHistories(cloud, historyRef.current));
       if (historiesEqual(cloud, historyRef.current)) {
-        setSyncStatus("synced");
+        setStatus("synced");
         return true;
       }
       return pushHistory();
     } catch (err) {
       console.warn("Cloud sync failed:", err);
-      setSyncStatus("pending");
+      setStatus("pending");
       return false;
     }
-  }, [apiFetch, applyHistory, pushHistory]);
+  }, [apiFetch, applyHistory, pushHistory, setStatus]);
 
   // Load local data first, then sync; retry when the connection or the tab comes back
   useEffect(() => {
@@ -239,6 +257,10 @@ export default function WorkoutTrackerApp() {
       // storage unavailable
     }
     void syncWithCloud();
+
+    if ("serviceWorker" in navigator && process.env.NODE_ENV === "production") {
+      navigator.serviceWorker.register("/sw.js").catch((err) => console.warn("Service worker:", err));
+    }
 
     const retry = () => {
       if (document.visibilityState === "visible" && navigator.onLine) void syncWithCloud();
@@ -328,9 +350,16 @@ export default function WorkoutTrackerApp() {
     setTimerState((prev) => ({ ...prev, visible: false, isRunning: false }));
   };
 
+  // A fresh Google login started from the clean address; entries saved so far stay on the device
+  const handleRelogin = () => {
+    window.location.replace("/");
+  };
+
   // Manual cloud sync
   const handleManualSync = async () => {
     const ok = await syncWithCloud();
+    // The banner at the top already offers a new login
+    if (!ok && syncStatusRef.current === "expired") return;
     if (ok) {
       toast({
         title: "Sincronizzazione completata!",
@@ -370,6 +399,7 @@ export default function WorkoutTrackerApp() {
     synced: { label: "Cloud Sync", icon: <CheckCircle2 className="h-3 w-3 text-emerald-500" /> },
     pending: { label: "Non sincronizzato", icon: <CloudOff className="h-3 w-3 text-amber-500" /> },
     locked: { label: "Codice richiesto", icon: <Lock className="h-3 w-3 text-amber-500" /> },
+    expired: { label: "Accesso scaduto", icon: <LogIn className="h-3 w-3 text-amber-500" /> },
   };
 
   return (
@@ -394,7 +424,10 @@ export default function WorkoutTrackerApp() {
           <div className="flex items-center gap-2">
             <Badge
               variant="outline"
-              onClick={() => syncStatus !== "synced" && setActiveTab("impostazioni")}
+              onClick={() => {
+                if (syncStatus === "expired") handleRelogin();
+                else if (syncStatus !== "synced") setActiveTab("impostazioni");
+              }}
               className="flex items-center gap-1 text-xs text-muted-foreground border-border whitespace-nowrap shrink-0"
             >
               {syncBadge[syncStatus].icon}
@@ -403,6 +436,20 @@ export default function WorkoutTrackerApp() {
           </div>
         </div>
       </header>
+
+      {syncStatus === "expired" && (
+        <div className="bg-amber-500/10 border-b border-amber-500/30">
+          <div className="container mx-auto px-4 py-2.5 max-w-5xl flex items-center justify-between gap-3">
+            <p className="text-xs sm:text-sm text-amber-700 dark:text-amber-400">
+              Accesso Google scaduto. Quello che salvi resta sul telefono.
+            </p>
+            <Button size="sm" onClick={handleRelogin} className="shrink-0 gap-1.5">
+              <LogIn className="h-4 w-4" />
+              Riaccedi
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Main Container */}
       <main className="flex-grow container mx-auto px-3 sm:px-6 py-5 max-w-4xl space-y-5">
