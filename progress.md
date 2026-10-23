@@ -5,7 +5,7 @@ Applicazione web moderna per il tracciamento degli allenamenti, progressioni di 
 
 ---
 
-## 🚀 Stato Attuale (aggiornato al 10/10/2026)
+## 🚀 Stato Attuale (aggiornato al 23/10/2026)
 - [x] **Programma**: due schede full-body con focus sulla parte alta (A e B, circa 50 minuti, 2 sedute a settimana), con superserie solo tra attrezzi vicini. Definite in `src/lib/workout-data.ts`.
 - [x] **Stack Tecnologico**:
   - **Frontend/Backend:** Next.js 14.2.35 (App Router, `src/app/page.tsx`, `src/app/api/workout/route.ts`).
@@ -18,6 +18,7 @@ Applicazione web moderna per il tracciamento degli allenamenti, progressioni di 
 - [x] **Dati**: bucket `workout-tracker-uexmt-data` (europe-west8, versioning attivo), file `data/workout_history.json`.
 - [x] **Deploy**: GitHub Actions a ogni push su `main` (typecheck, test, build, poi deploy), autenticazione con Workload Identity Federation, nessuna chiave salvata.
 - [x] **App installabile (PWA, 19/10/2026)**: manifest, icone e service worker (`public/sw.js`). Si installa da Chrome sul telefono con "Installa app". Il service worker salva la pagina e i file della build, così l'app si apre anche con poco segnale; non salva mai l'API né i passaggi del login. Quando il login Google scade, l'API riceve 401 da IAP (grazie all'header `X-Requested-With`) e l'app mostra il pulsante "Riaccedi", che fa partire un login nuovo da `/`. Così si evita l'errore IAP 9, che nasce quando un login lasciato a metà viene ripreso dopo più di 10 minuti.
+  - **Installata sul telefono il 23/10/2026** (Android, Chrome, "Installa app"). Verificato nei log di Cloud Run: manifest, `sw.js`, icona maskable e `/api/workout` rispondono 200 anche dietro IAP. Da ora l'app si apre dall'icona.
 - [x] **Archivio Prototipo**: il vecchio codice Streamlit è in `old_streamlit_prototype/`.
 
 ---
@@ -27,6 +28,8 @@ Applicazione web moderna per il tracciamento degli allenamenti, progressioni di 
 - [x] CI/CD GitHub Actions con controlli (typecheck, test, build) e deploy su Cloud Run.
 - [x] API protetta da codice di accesso, sincronizzazione con unione dei dati, registrazione delle ripetizioni.
 - [x] Login con Google tramite IAP (client OAuth personalizzato), accesso pubblico chiuso.
+- [x] App installabile (PWA) con pulsante "Riaccedi"; installata e verificata sul telefono il 23/10/2026.
+- [ ] Eliminare il vecchio backend Firebase App Hosting `studio` (us-central1): risponde 404 e riceve solo traffico di bot.
 - [ ] Decidere se eliminare il vecchio bucket `ai-studio-bucket-746817612779-us-west1` (dati già migrati; contiene anche un archivio di build di AI Studio di marzo 2026).
 - [ ] Aggiornamento a una major di Next.js più recente (la linea 14.x ha avvisi di sicurezza aperti).
 - [ ] Pianificare la migrazione del servizio Cloud Run su `dani-lab-507314` (quando vorrai consolidare i progetti).
