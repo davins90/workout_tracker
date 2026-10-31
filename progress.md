@@ -6,7 +6,7 @@ Applicazione web moderna per il tracciamento degli allenamenti, progressioni di 
 ---
 
 ## 🚀 Stato Attuale (aggiornato al 23/10/2026)
-- [x] **Programma**: due schede full-body con focus sulla parte alta (A e B, circa 50 minuti, 2 sedute a settimana), con superserie solo tra attrezzi vicini. Definite in `src/lib/workout-data.ts`.
+- [x] **Programma**: due schede full-body con focus sulla parte alta (A e B, circa 50 minuti, 2 sedute a settimana), con superserie solo tra attrezzi vicini. Definite in `src/lib/workout-data.ts`. Rivista il 31/10/2026: a settimana petto 10 serie, dorso 11 (più 3 di face pull), alzate 7, bicipiti/avambracci 8, tricipiti 6, gambe al minimo per scelta. Nella B c'è anche la lat machine presa neutra e, facoltative, 2 serie di croci (pec deck, cavi o manubri) per salire a 12 serie di petto quando c'è tempo.
 - [x] **Stack Tecnologico**:
   - **Frontend/Backend:** Next.js 14.2.35 (App Router, `src/app/page.tsx`, `src/app/api/workout/route.ts`).
   - **UI/Styling:** Tailwind CSS, Radix UI (`src/components/ui/`), Lucide React.
