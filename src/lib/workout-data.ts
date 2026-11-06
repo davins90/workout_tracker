@@ -34,7 +34,7 @@ export const WORKOUT_DAYS: WorkoutDay[] = [
     id: "scheda-a",
     titolo: "A — Upper + Leg press",
     tipo: "base",
-    durataStimata: "≈50 min",
+    durataStimata: "≈55 min",
     esercizi: [
       {
         id: "panca_inclinata_multi",
@@ -130,7 +130,7 @@ export const WORKOUT_DAYS: WorkoutDay[] = [
     id: "scheda-b",
     titolo: "B — Upper + Stacco rumeno",
     tipo: "base",
-    durataStimata: "≈50 min",
+    durataStimata: "≈55 min",
     esercizi: [
       {
         id: "chest_press_b",
@@ -138,15 +138,15 @@ export const WORKOUT_DAYS: WorkoutDay[] = [
         gruppo: "Petto",
         serie: 4,
         repsTarget: "8–12",
-        recupero: 90,
+        recupero: 75,
       },
       {
         id: "pulley_seated_row",
         nome: "Pulley / seated row",
         gruppo: "Dorso",
-        serie: 4,
+        serie: 3,
         repsTarget: "8–12",
-        recupero: 90,
+        recupero: 75,
       },
       {
         id: "romanian_deadlift",
@@ -154,7 +154,7 @@ export const WORKOUT_DAYS: WorkoutDay[] = [
         gruppo: "Femorali/Glutei",
         serie: 3,
         repsTarget: "6–10",
-        recupero: 120,
+        recupero: 90,
       },
       {
         id: "lat_machine_neutra",
@@ -172,7 +172,6 @@ export const WORKOUT_DAYS: WorkoutDay[] = [
         serie: 2,
         repsTarget: "12–15",
         recupero: 60,
-        opzionale: true,
       },
       {
         id: "alzate_laterali_b",
