@@ -297,6 +297,11 @@ export default function WorkoutTrackerApp() {
     return entries.length > 0 ? entries[entries.length - 1] : undefined;
   };
 
+  const getPreviousEntry = (exerciseName: string, beforeDate: string): WeightHistoryEntry | undefined => {
+    const entries = (history[exerciseName] || []).filter((e) => e.data < beforeDate);
+    return entries.length > 0 ? entries[entries.length - 1] : undefined;
+  };
+
   // Timer controls
   const handleStartTimer = (seconds: number, exerciseName: string) => {
     unlockAudio();
@@ -515,6 +520,7 @@ export default function WorkoutTrackerApp() {
                     key={exercise.id}
                     exercise={exercise}
                     getLatestEntry={getLatestEntry}
+                    getPreviousEntry={getPreviousEntry}
                     onSaveWeights={handleSaveWeights}
                     onStartTimer={handleStartTimer}
                   />

@@ -22,6 +22,7 @@ import { format, parseISO } from "date-fns";
 interface WorkoutExerciseCardProps {
   exercise: Exercise;
   getLatestEntry: (exerciseName: string) => WeightHistoryEntry | undefined;
+  getPreviousEntry: (exerciseName: string, beforeDate: string) => WeightHistoryEntry | undefined;
   onSaveWeights: (exerciseName: string, series: (number | null)[], reps: (number | null)[]) => void;
   onStartTimer: (seconds: number, exerciseName: string) => void;
 }
@@ -33,6 +34,16 @@ function toNumber(value: string): number | null {
   return value.trim() === "" || isNaN(n) || n < 0 ? null : n;
 }
 
+// Upper bound of the target range ("8–12" -> 12), used when there is no history yet
+function topOfRange(range: string): number | null {
+  const nums = range.match(/\d+/g);
+  return nums ? Number(nums[nums.length - 1]) : null;
+}
+
+function lastValue(values: (number | null)[] | undefined): number | null | undefined {
+  return [...(values || [])].reverse().find((v) => v !== null && v !== undefined);
+}
+
 function formatSet(kg: number | null | undefined, reps: number | null | undefined): string {
   return reps !== null && reps !== undefined ? `${kg ?? "–"}×${reps}` : `${kg}`;
 }
@@ -40,6 +51,7 @@ function formatSet(kg: number | null | undefined, reps: number | null | undefine
 export function WorkoutExerciseCard({
   exercise,
   getLatestEntry,
+  getPreviousEntry,
   onSaveWeights,
   onStartTimer,
 }: WorkoutExerciseCardProps) {
@@ -54,11 +66,15 @@ export function WorkoutExerciseCard({
   const historyEntry = getLatestEntry(currentExerciseName);
   const todayStr = format(new Date(), "yyyy-MM-dd");
   const isTodayEntry = historyEntry?.data === todayStr;
+  // Last session before today: source of the prefilled kg and reps
+  const previousEntry = getPreviousEntry(currentExerciseName, todayStr);
 
   // Values typed in the current session
   const [weights, setWeights] = useState<string[]>([]);
   const [reps, setReps] = useState<string[]>([]);
   const [completedSets, setCompletedSets] = useState<boolean[]>([]);
+  // Reps edited by hand in this session (an edited set counts as done)
+  const [repsTouched, setRepsTouched] = useState<boolean[]>([]);
 
   // Once the user has typed something, history updates must not overwrite it
   const dirtyRef = useRef(false);
@@ -73,20 +89,28 @@ export function WorkoutExerciseCard({
     }
     if (dirtyRef.current) return;
 
-    const lastSeries = historyEntry?.serie || [];
-    // Same exercise can have a different number of sets in another day: reuse the last known weight
-    const fallback = [...lastSeries].reverse().find((v) => v !== null && v !== undefined);
+    // Sets already done today keep today's values; the others are prefilled from the last session.
+    // The same exercise can have a different number of sets on another day: reuse the last known value.
+    const todayKg = isTodayEntry ? historyEntry?.serie || [] : [];
     const todayReps = isTodayEntry ? historyEntry?.reps || [] : [];
+    const prevKg = previousEntry?.serie || [];
+    const prevReps = previousEntry?.reps || [];
+    const kgFallback = lastValue(prevKg) ?? lastValue(todayKg);
+    const repsFallback = lastValue(prevReps) ?? topOfRange(exercise.repsTarget);
     const sets = Array.from({ length: exercise.serie });
+    const doneToday = (i: number) =>
+      (todayReps[i] !== null && todayReps[i] !== undefined) ||
+      (todayKg[i] !== null && todayKg[i] !== undefined);
 
-    setWeights(sets.map((_, i) => String(lastSeries[i] ?? fallback ?? "")));
-    setReps(sets.map((_, i) => String(todayReps[i] ?? "")));
-    setCompletedSets(sets.map((_, i) => todayReps[i] !== null && todayReps[i] !== undefined));
-  }, [historyEntry, isTodayEntry, exercise.serie, activeVariant]);
+    setWeights(sets.map((_, i) => String((doneToday(i) ? todayKg[i] : null) ?? prevKg[i] ?? kgFallback ?? "")));
+    setReps(sets.map((_, i) => String((doneToday(i) ? todayReps[i] : null) ?? prevReps[i] ?? repsFallback ?? "")));
+    setCompletedSets(sets.map((_, i) => doneToday(i)));
+    setRepsTouched(sets.map(() => false));
+  }, [historyEntry, previousEntry, isTodayEntry, exercise.serie, exercise.repsTarget, activeVariant]);
 
-  // Sets that are ticked or have reps typed in count as done; the rest is not written to history
+  // Sets that are ticked or whose reps were edited count as done; prefilled values alone are not written
   const buildEntry = (onlyDone: boolean) => {
-    const include = (i: number) => !onlyDone || completedSets[i] || toNumber(reps[i] ?? "") !== null;
+    const include = (i: number) => !onlyDone || completedSets[i] || repsTouched[i];
     return {
       serie: weights.map((w, i) => (include(i) ? toNumber(w) : null)),
       reps: reps.map((r, i) => (include(i) ? toNumber(r) : null)),
@@ -103,7 +127,7 @@ export function WorkoutExerciseCard({
     }, AUTOSAVE_DELAY_MS);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weights, reps, completedSets]);
+  }, [weights, reps, completedSets, repsTouched]);
 
   const handleWeightChange = (index: number, val: string) => {
     dirtyRef.current = true;
@@ -113,6 +137,7 @@ export function WorkoutExerciseCard({
   const handleRepsChange = (index: number, val: string) => {
     dirtyRef.current = true;
     setReps((prev) => prev.map((r, i) => (i === index ? val : r)));
+    setRepsTouched((prev) => prev.map((t, i) => (i === index ? true : t)));
   };
 
   const toggleSetComplete = (index: number) => {
@@ -128,6 +153,8 @@ export function WorkoutExerciseCard({
 
   const handleSave = () => {
     const entry = buildEntry(false);
+    dirtyRef.current = true;
+    setCompletedSets((prev) => prev.map(() => true));
     onSaveWeights(currentExerciseName, entry.serie, entry.reps);
     toast({
       title: "Sessione salvata!",
@@ -135,7 +162,6 @@ export function WorkoutExerciseCard({
     });
   };
 
-  const previousReps = isTodayEntry ? [] : historyEntry?.reps || [];
   const lastSets = (historyEntry?.serie || [])
     .map((kg, i) => ({ kg, reps: historyEntry?.reps?.[i] }))
     .filter((set) => set.kg !== null && set.kg > 0);
@@ -292,7 +318,7 @@ export function WorkoutExerciseCard({
                     aria-label={`Peso set ${idx + 1}`}
                     value={weights[idx] ?? ""}
                     onChange={(e) => handleWeightChange(idx, e.target.value)}
-                    className="h-9 w-[4.5rem] text-right font-mono font-semibold"
+                    className={`h-9 w-[4.5rem] text-right font-mono font-semibold ${isDone ? "" : "text-muted-foreground"}`}
                   />
                   <span className="text-xs text-muted-foreground font-medium">kg ×</span>
                   <Input
@@ -300,11 +326,11 @@ export function WorkoutExerciseCard({
                     inputMode="numeric"
                     step="1"
                     min="0"
-                    placeholder={String(previousReps[idx] ?? "rip.")}
+                    placeholder="rip."
                     aria-label={`Ripetizioni set ${idx + 1}`}
                     value={reps[idx] ?? ""}
                     onChange={(e) => handleRepsChange(idx, e.target.value)}
-                    className="h-9 w-16 text-right font-mono font-semibold"
+                    className={`h-9 w-16 text-right font-mono font-semibold ${isDone || repsTouched[idx] ? "" : "text-muted-foreground"}`}
                   />
                 </div>
               </div>
