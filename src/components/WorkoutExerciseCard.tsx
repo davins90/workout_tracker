@@ -58,9 +58,12 @@ export function WorkoutExerciseCard({
   const { toast } = useToast();
 
   // Handle variants (e.g. Face pull vs Reverse fly)
-  const [activeVariant, setActiveVariant] = useState<string>(
-    exercise.varianti && exercise.varianti.length > 0 ? exercise.varianti[0] : exercise.nome
-  );
+  // Reopening the app mid-session keeps the variant already used today
+  const [activeVariant, setActiveVariant] = useState<string>(() => {
+    if (!exercise.varianti || exercise.varianti.length === 0) return exercise.nome;
+    const today = format(new Date(), "yyyy-MM-dd");
+    return exercise.varianti.find((v) => getLatestEntry(v)?.data === today) ?? exercise.varianti[0];
+  });
 
   const currentExerciseName = activeVariant;
   const historyEntry = getLatestEntry(currentExerciseName);
@@ -222,7 +225,7 @@ export function WorkoutExerciseCard({
 
             {/* If variants exist, show switch pills */}
             {exercise.varianti && (
-              <div className="flex items-center gap-1.5 pt-1">
+              <div className="flex items-center flex-wrap gap-1.5 pt-1">
                 <span className="text-xs text-muted-foreground font-medium mr-1">Variante:</span>
                 {exercise.varianti.map((v) => (
                   <button

@@ -26,7 +26,7 @@ import {
   Settings2,
 } from "lucide-react";
 import { format } from "date-fns";
-import { historiesEqual, mergeHistories, sanitizeHistory } from "@/lib/history";
+import { hasSets, historiesEqual, mergeHistories, sanitizeHistory } from "@/lib/history";
 
 const LOCAL_STORAGE_KEY = "workout_tracker_history_v3";
 const ACCESS_CODE_KEY = "workout_tracker_access_code";
@@ -293,12 +293,12 @@ export default function WorkoutTrackerApp() {
 
   // Latest recorded entry for an exercise name (the card asks for its active variant)
   const getLatestEntry = (exerciseName: string): WeightHistoryEntry | undefined => {
-    const entries = history[exerciseName] || [];
+    const entries = (history[exerciseName] || []).filter(hasSets);
     return entries.length > 0 ? entries[entries.length - 1] : undefined;
   };
 
   const getPreviousEntry = (exerciseName: string, beforeDate: string): WeightHistoryEntry | undefined => {
-    const entries = (history[exerciseName] || []).filter((e) => e.data < beforeDate);
+    const entries = (history[exerciseName] || []).filter((e) => hasSets(e) && e.data < beforeDate);
     return entries.length > 0 ? entries[entries.length - 1] : undefined;
   };
 

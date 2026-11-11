@@ -43,6 +43,13 @@ export const WORKOUT_DAYS: WorkoutDay[] = [
         serie: 4,
         repsTarget: "6–10",
         recupero: 105,
+        // Multipower often busy: same movement with dumbbells or barbell; each variant keeps its own history
+        varianti: [
+          "Panca inclinata multipower",
+          "Panca inclinata manubri",
+          "Panca inclinata bilanciere",
+          "Panca piana bilanciere",
+        ],
       },
       {
         id: "chest_press_a",

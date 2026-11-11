@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mergeHistories, sanitizeHistory, historiesEqual } from "../src/lib/history.ts";
+import { mergeHistories, sanitizeHistory, historiesEqual, hasSets } from "../src/lib/history.ts";
 
 test("merge keeps entries that exist on only one side", () => {
   const cloud = { Panca: [{ data: "2026-10-01", serie: [40] }] };
@@ -48,4 +48,12 @@ test("historiesEqual ignores key and entry order", () => {
   const b = { A: [{ data: "2026-10-01", serie: [1] }], B: [{ data: "2026-10-02", serie: [1] }] };
   assert.ok(historiesEqual(a, b));
   assert.ok(!historiesEqual(a, {}));
+});
+
+test("an empty newer entry deletes a day on every device", () => {
+  const phone = { Panca: [{ data: "2026-11-09", serie: [10, 12], ts: 1 }] };
+  const cloud = sanitizeHistory({ Panca: [{ data: "2026-11-09", serie: [], ts: 2 }] });
+  const merged = mergeHistories(cloud, phone);
+  assert.equal(merged.Panca.length, 1);
+  assert.equal(merged.Panca.filter(hasSets).length, 0);
 });

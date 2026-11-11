@@ -54,3 +54,8 @@ export function mergeHistories(
 export function historiesEqual(a: ExerciseHistoryMap, b: ExerciseHistoryMap): boolean {
   return JSON.stringify(mergeHistories(a, {})) === JSON.stringify(mergeHistories(b, {}));
 }
+
+// An entry with no recorded set is a deletion marker: newer than the old entry, it wins the merge on every device
+export function hasSets(entry: WeightHistoryEntry): boolean {
+  return entry.serie.some((v) => v !== null && v !== undefined);
+}
