@@ -523,7 +523,7 @@ export default function WorkoutTrackerApp() {
                   Ultimo: Scheda {dayLabel(last.dayId)} · {format(parseISO(last.date), "EEE d/M", { locale: it })} ({lastAgo})
                 </p>
                 <p className="text-xs text-muted-foreground pt-0.5">
-                  {last.exercises} esercizi · {last.sets} serie
+                  {last.exercises} {last.exercises === 1 ? "esercizio" : "esercizi"} · {last.sets} serie
                   {last.minutes ? ` · ${last.minutes} min` : ""}
                 </p>
               </div>
