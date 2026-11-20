@@ -16,8 +16,10 @@ import {
   Save,
   Shield,
   Timer,
+  TrendingUp,
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
+import { defaultVariant, progressionHint, topOfRange } from "@/lib/progression";
 
 interface WorkoutExerciseCardProps {
   exercise: Exercise;
@@ -34,18 +36,12 @@ function toNumber(value: string): number | null {
   return value.trim() === "" || isNaN(n) || n < 0 ? null : n;
 }
 
-// Upper bound of the target range ("8–12" -> 12), used when there is no history yet
-function topOfRange(range: string): number | null {
-  const nums = range.match(/\d+/g);
-  return nums ? Number(nums[nums.length - 1]) : null;
-}
-
 function lastValue(values: (number | null)[] | undefined): number | null | undefined {
   return [...(values || [])].reverse().find((v) => v !== null && v !== undefined);
 }
 
 function formatSet(kg: number | null | undefined, reps: number | null | undefined): string {
-  return reps !== null && reps !== undefined ? `${kg ?? "–"}×${reps}` : `${kg}`;
+  return reps !== null && reps !== undefined ? `${kg ?? "–"} kg × ${reps}` : `${kg} kg`;
 }
 
 export function WorkoutExerciseCard({
@@ -57,17 +53,22 @@ export function WorkoutExerciseCard({
 }: WorkoutExerciseCardProps) {
   const { toast } = useToast();
 
-  // Handle variants (e.g. Face pull vs Reverse fly)
-  // Reopening the app mid-session keeps the variant already used today
-  const [activeVariant, setActiveVariant] = useState<string>(() => {
-    if (!exercise.varianti || exercise.varianti.length === 0) return exercise.nome;
-    const today = format(new Date(), "yyyy-MM-dd");
-    return exercise.varianti.find((v) => getLatestEntry(v)?.data === today) ?? exercise.varianti[0];
-  });
+  // Handle variants (e.g. Face pull vs Reverse fly).
+  // Until one is picked, follow the history (it loads after the first render):
+  // the variant used today, else the last one used
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const [pickedVariant, setPickedVariant] = useState<string | null>(null);
+  const activeVariant =
+    pickedVariant ??
+    (exercise.varianti && exercise.varianti.length > 0
+      ? defaultVariant(exercise.varianti, (v) => getLatestEntry(v)?.data, todayStr)
+      : exercise.nome);
+  const setActiveVariant = setPickedVariant;
+  // Typing freezes the variant shown, so a sync can never move the values to another one
+  const freezeVariant = () => setPickedVariant((v) => v ?? activeVariant);
 
   const currentExerciseName = activeVariant;
   const historyEntry = getLatestEntry(currentExerciseName);
-  const todayStr = format(new Date(), "yyyy-MM-dd");
   const isTodayEntry = historyEntry?.data === todayStr;
   // Last session before today: source of the prefilled kg and reps
   const previousEntry = getPreviousEntry(currentExerciseName, todayStr);
@@ -134,17 +135,20 @@ export function WorkoutExerciseCard({
 
   const handleWeightChange = (index: number, val: string) => {
     dirtyRef.current = true;
+    freezeVariant();
     setWeights((prev) => prev.map((w, i) => (i === index ? val : w)));
   };
 
   const handleRepsChange = (index: number, val: string) => {
     dirtyRef.current = true;
+    freezeVariant();
     setReps((prev) => prev.map((r, i) => (i === index ? val : r)));
     setRepsTouched((prev) => prev.map((t, i) => (i === index ? true : t)));
   };
 
   const toggleSetComplete = (index: number) => {
     dirtyRef.current = true;
+    freezeVariant();
     const nowDone = !completedSets[index];
     setCompletedSets((prev) => prev.map((done, i) => (i === index ? nowDone : done)));
 
@@ -157,12 +161,23 @@ export function WorkoutExerciseCard({
   const handleSave = () => {
     const entry = buildEntry(false);
     dirtyRef.current = true;
+    freezeVariant();
     setCompletedSets((prev) => prev.map(() => true));
     onSaveWeights(currentExerciseName, entry.serie, entry.reps);
     toast({
       title: "Sessione salvata!",
       description: `Carichi e ripetizioni aggiornati per ${currentExerciseName}.`,
     });
+  };
+
+  // Last session hit the top of the range on every set: suggest the next weight (sets not done yet only)
+  const hint = progressionHint(previousEntry, exercise.repsTarget, exercise.serie);
+  const hintApplied = hint !== null && weights.every((w, i) => completedSets[i] || toNumber(w) === hint.toKg);
+  const applyHint = () => {
+    if (!hint) return;
+    dirtyRef.current = true;
+    freezeVariant();
+    setWeights((prev) => prev.map((w, i) => (completedSets[i] ? w : String(hint.toKg))));
   };
 
   const lastSets = (historyEntry?.serie || [])
@@ -270,10 +285,30 @@ export function WorkoutExerciseCard({
           <span>Ultimo carico registrato: {formattedDate}</span>
           {lastSets.length > 0 && (
             <span className="font-mono text-foreground font-semibold ml-1">
-              ({lastSets.map((set) => formatSet(set.kg, set.reps)).join(" - ")} kg)
+              ({lastSets.map((set) => formatSet(set.kg, set.reps)).join(" · ")})
             </span>
           )}
         </div>
+
+        {hint && !isTodayEntry && (
+          <div className="flex items-center justify-between gap-2 mt-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
+            <div className="flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-400">
+              <TrendingUp className="h-4 w-4 shrink-0" />
+              <span>
+                L&apos;ultima volta a {hint.fromKg} kg sei arrivato a {topOfRange(exercise.repsTarget)} rip.: prova {hint.toKg} kg su tutte le serie
+              </span>
+            </div>
+            <Button
+              size="sm"
+              variant={hintApplied ? "secondary" : "default"}
+              disabled={hintApplied}
+              onClick={applyHint}
+              className="h-7 px-2.5 text-xs shrink-0 bg-emerald-600 hover:bg-emerald-600/90 text-white disabled:bg-muted disabled:text-muted-foreground"
+            >
+              {hintApplied ? `${hint.toKg} kg ✓` : `${hint.toKg} kg`}
+            </Button>
+          </div>
+        )}
       </CardHeader>
 
       <CardContent className="p-4 sm:p-5 pt-0 space-y-3">

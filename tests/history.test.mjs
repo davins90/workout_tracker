@@ -83,3 +83,22 @@ test("last session ignores deletion markers and empty history", () => {
   assert.equal(lastSession(h, DAYS).dayId, "scheda-a");
   assert.equal(nextDayId(lastSession(h, DAYS), DAYS), "scheda-b");
 });
+
+import { progressionHint, defaultVariant } from "../src/lib/progression.ts";
+
+test("progression hint when the heaviest sets hit the top of the range", () => {
+  assert.deepEqual(progressionHint({ data: "d", serie: [30, 30, 30], reps: [12, 12, 12] }, "8–12", 3), { fromKg: 30, toKg: 35 });
+  assert.deepEqual(progressionHint({ data: "d", serie: [8, 8, 8], reps: [12, 13, 12] }, "8–12", 3), { fromKg: 8, toKg: 9 });
+  assert.equal(progressionHint({ data: "d", serie: [30, 30, 30], reps: [12, 12, 11] }, "8–12", 3), null);
+  assert.deepEqual(progressionHint({ data: "d", serie: [70, 80, 90], reps: [12, 12, 12] }, "8–12", 3), { fromKg: 90, toKg: 95 });
+  assert.equal(progressionHint({ data: "d", serie: [25, 30, 35], reps: [12, 12, 8] }, "8–12", 3), null);
+  assert.equal(progressionHint({ data: "d", serie: [30, 30], reps: [12, 12] }, "8–12", 3), null);
+  assert.equal(progressionHint(undefined, "8–12", 3), null);
+});
+
+test("default variant: today's, else most recent, else first", () => {
+  const dates = { A: "2026-10-31", B: "2026-11-09" };
+  assert.equal(defaultVariant(["A", "B", "C"], (v) => dates[v], "2026-11-20"), "B");
+  assert.equal(defaultVariant(["A", "B"], (v) => ({ A: "2026-11-20", B: "2026-11-09" })[v], "2026-11-20"), "A");
+  assert.equal(defaultVariant(["A", "B"], () => undefined, "2026-11-20"), "A");
+});
