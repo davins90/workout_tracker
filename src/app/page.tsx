@@ -20,16 +20,39 @@ import {
   Clock,
   CloudOff,
   Dumbbell,
+  History as HistoryIcon,
   Lock,
   LogIn,
   RefreshCw,
   Settings2,
 } from "lucide-react";
-import { format } from "date-fns";
+import { differenceInCalendarDays, format, parseISO } from "date-fns";
+import { it } from "date-fns/locale";
 import { hasSets, historiesEqual, mergeHistories, sanitizeHistory } from "@/lib/history";
+import { lastSession, nextDayId } from "@/lib/sessions";
 
 const LOCAL_STORAGE_KEY = "workout_tracker_history_v3";
 const ACCESS_CODE_KEY = "workout_tracker_access_code";
+const ACTIVE_TAB_KEY = "workout_tracker_active_tab";
+const TAB_IDS = [...WORKOUT_DAYS.map((d) => d.id), "grafici", "impostazioni"];
+
+// The tab open before a reload, kept only for the same day: on a new day the app opens on the next workout
+function readSavedTab(): string | null {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(ACTIVE_TAB_KEY) || "null");
+    const today = format(new Date(), "yyyy-MM-dd");
+    return saved && saved.date === today && TAB_IDS.includes(saved.tab) ? saved.tab : null;
+  } catch {
+    return null;
+  }
+}
+
+// Mid-session (something already saved today) stay on today's day, otherwise the next one in the program
+function suggestedTab(history: ExerciseHistoryMap): string {
+  const last = lastSession(history, WORKOUT_DAYS);
+  if (last && last.date === format(new Date(), "yyyy-MM-dd")) return last.dayId;
+  return nextDayId(last, WORKOUT_DAYS) ?? WORKOUT_DAYS[0].id;
+}
 
 export type SyncStatus = "loading" | "syncing" | "synced" | "pending" | "locked" | "expired";
 
@@ -95,7 +118,22 @@ function playChimeSound() {
 
 export default function WorkoutTrackerApp() {
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState<string>("scheda-a");
+  const [activeTab, setActiveTabState] = useState<string>(WORKOUT_DAYS[0].id);
+  // True until the person picks a tab or one is restored: the first cloud sync may then move to the next workout
+  const autoTabRef = useRef(true);
+
+  const setActiveTab = useCallback((tab: string) => {
+    autoTabRef.current = false;
+    setActiveTabState(tab);
+    try {
+      window.localStorage.setItem(
+        ACTIVE_TAB_KEY,
+        JSON.stringify({ tab, date: format(new Date(), "yyyy-MM-dd") })
+      );
+    } catch {
+      // storage unavailable
+    }
+  }, []);
   const [history, setHistory] = useState<ExerciseHistoryMap>({});
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("loading");
   const [accessCode, setAccessCode] = useState<string>("");
@@ -171,6 +209,7 @@ export default function WorkoutTrackerApp() {
   const applyHistory = useCallback((next: ExerciseHistoryMap) => {
     historyRef.current = next;
     setHistory(next);
+    if (autoTabRef.current) setActiveTabState(suggestedTab(next));
     try {
       window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(next));
     } catch (err) {
@@ -248,6 +287,11 @@ export default function WorkoutTrackerApp() {
 
   // Load local data first, then sync; retry when the connection or the tab comes back
   useEffect(() => {
+    const savedTab = readSavedTab();
+    if (savedTab) {
+      autoTabRef.current = false;
+      setActiveTabState(savedTab);
+    }
     applyHistory(readLocalHistory());
     try {
       const code = window.localStorage.getItem(ACCESS_CODE_KEY) || "";
@@ -285,6 +329,9 @@ export default function WorkoutTrackerApp() {
       reps,
       ts: Date.now(),
     };
+
+    // Saving fixes the open tab, so a later sync never moves away from it
+    if (autoTabRef.current) setActiveTab(activeTab);
 
     // One entry per exercise per day: today's entry replaces the previous one
     applyHistory(mergeHistories(historyRef.current, { [exerciseName]: [newEntry] }));
@@ -398,6 +445,15 @@ export default function WorkoutTrackerApp() {
     void pushHistory();
   };
 
+  const last = lastSession(history, WORKOUT_DAYS);
+  const nextId = nextDayId(last, WORKOUT_DAYS);
+  const dayLabel = (id: string | null) => WORKOUT_DAYS.find((d) => d.id === id)?.titolo.split(" ")[0] ?? "";
+  const lastAgo = (() => {
+    if (!last) return "";
+    const n = differenceInCalendarDays(new Date(), parseISO(last.date));
+    return n === 0 ? "oggi" : n === 1 ? "ieri" : `${n} giorni fa`;
+  })();
+
   const syncBadge: Record<SyncStatus, { label: string; icon: React.ReactNode }> = {
     loading: { label: "Caricamento...", icon: <RefreshCw className="h-3 w-3 animate-spin text-primary" /> },
     syncing: { label: "Sincronizzazione...", icon: <RefreshCw className="h-3 w-3 animate-spin text-primary" /> },
@@ -458,6 +514,33 @@ export default function WorkoutTrackerApp() {
 
       {/* Main Container */}
       <main className="flex-grow container mx-auto px-3 sm:px-6 py-5 max-w-4xl space-y-5">
+        {last && (
+          <div className="bg-card px-4 py-3 rounded-xl border border-border shadow-sm flex items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <HistoryIcon className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold leading-tight">
+                  Ultimo: Scheda {dayLabel(last.dayId)} · {format(parseISO(last.date), "EEE d/M", { locale: it })} ({lastAgo})
+                </p>
+                <p className="text-xs text-muted-foreground pt-0.5">
+                  {last.exercises} esercizi · {last.sets} serie
+                  {last.minutes ? ` · ${last.minutes} min` : ""}
+                </p>
+              </div>
+            </div>
+            {nextId && last.date !== format(new Date(), "yyyy-MM-dd") && (
+              <Button
+                size="sm"
+                variant={activeTab === nextId ? "secondary" : "default"}
+                onClick={() => setActiveTab(nextId)}
+                className="shrink-0 font-bold"
+              >
+                Oggi: {dayLabel(nextId)}
+              </Button>
+            )}
+          </div>
+        )}
+
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-5">
           {/* Navigation Tabs */}
           <TabsList className="grid grid-cols-4 w-full h-12 p-1 bg-muted/80 rounded-xl shadow-inner">

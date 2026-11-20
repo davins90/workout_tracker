@@ -57,3 +57,29 @@ test("an empty newer entry deletes a day on every device", () => {
   assert.equal(merged.Panca.length, 1);
   assert.equal(merged.Panca.filter(hasSets).length, 0);
 });
+
+import { lastSession, nextDayId } from "../src/lib/sessions.ts";
+
+const DAYS = [
+  { id: "scheda-a", esercizi: [{ nome: "Panca inclinata multipower", varianti: ["Panca piana bilanciere"] }, { nome: "Chest press" }, { nome: "Lat machine" }] },
+  { id: "scheda-b", esercizi: [{ nome: "Chest press" }, { nome: "Pulley" }, { nome: "Romanian deadlift" }] },
+];
+
+test("last session: latest date, matched by exercises unique to a day", () => {
+  const h = {
+    "Chest press": [{ data: "2026-11-09", serie: [25] }, { data: "2026-11-14", serie: [30, 30], ts: 1000 }],
+    "Panca piana bilanciere": [{ data: "2026-11-09", serie: [20, 30] }],
+    Pulley: [{ data: "2026-11-14", serie: [25, 30, 35], ts: 1000 + 30 * 60000 }],
+  };
+  const last = lastSession(h, DAYS);
+  assert.deepEqual(last, { date: "2026-11-14", dayId: "scheda-b", exercises: 2, sets: 5, minutes: 30 });
+  assert.equal(nextDayId(last, DAYS), "scheda-a");
+});
+
+test("last session ignores deletion markers and empty history", () => {
+  assert.equal(lastSession({}, DAYS), null);
+  assert.equal(nextDayId(null, DAYS), "scheda-a");
+  const h = { "Lat machine": [{ data: "2026-11-09", serie: [40] }], Pulley: [{ data: "2026-11-20", serie: [] }] };
+  assert.equal(lastSession(h, DAYS).dayId, "scheda-a");
+  assert.equal(nextDayId(lastSession(h, DAYS), DAYS), "scheda-b");
+});
