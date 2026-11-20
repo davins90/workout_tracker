@@ -8,11 +8,11 @@ Applicazione web moderna per il tracciamento degli allenamenti, progressioni di 
 ## 🚀 Stato Attuale (aggiornato al 23/10/2026)
 - [x] **Programma**: due schede full-body con focus sulla parte alta (A e B, circa 55 minuti, 2 sedute a settimana), con superserie solo tra attrezzi vicini. Definite in `src/lib/workout-data.ts`. Rivista il 31/10/2026: a settimana petto 10 serie, dorso 11 (più 3 di face pull), alzate 7, bicipiti/avambracci 8, tricipiti 6, gambe al minimo per scelta. Nella B c'è anche la lat machine presa neutra e, facoltative, 2 serie di croci (pec deck, cavi o manubri) per salire a 12 serie di petto quando c'è tempo. Rivista di nuovo il 06/11/2026, dopo le prime due sedute (A circa 55 min, B circa 65 min con le croci): le croci diventano fisse (in palestra si fanno alla Pectoral Technogym), il pulley passa a 3 serie, i recuperi della B scendono (chest press e pulley 75", Romanian deadlift 90"). Ora a settimana: petto 12 serie, dorso 10. Durata stimata di entrambe le schede: circa 55 minuti. Nella A aggiunte 2 serie di curl al polso, subito dopo la coppia face pull + pushdown (manubrio vicino ai cavi).
 - [x] **Stack Tecnologico**:
-  - **Frontend/Backend:** Next.js 14.2.35 (App Router, `src/app/page.tsx`, `src/app/api/workout/route.ts`).
+  - **Frontend/Backend:** Next.js 16.4.6 + React 19 (App Router, `src/app/page.tsx`, `src/app/api/workout/route.ts`).
   - **UI/Styling:** Tailwind CSS, Radix UI (`src/components/ui/`), Lucide React.
   - **Componenti Chiave:** `WorkoutExerciseCard.tsx`, `FloatingRestTimer.tsx`, `ProgressCharts.tsx`, `SyncSettings.tsx`.
   - **Logica dati:** `src/lib/history.ts` (validazione e unione dello storico), test in `tests/history.test.mjs`.
-- [x] **Funzioni**: kg e ripetizioni per serie precaricati dall'ultima seduta (se non c'è storico, ripetizioni in cima al range); i valori precaricati si salvano solo quando la serie viene spuntata o le ripetizioni modificate, salvataggio automatico, varianti con storico separato, timer di recupero, grafici, backup JSON.
+- [x] **Funzioni**: kg e ripetizioni per serie precaricati dall'ultima seduta (se non c'è storico, ripetizioni in cima al range); i valori precaricati si salvano solo quando la serie viene spuntata o le ripetizioni modificate, salvataggio automatico, varianti con storico separato (si apre l'ultima usata), riquadro "ultimo allenamento" con la scheda di oggi, scheda aperta salvata per tutto il giorno, suggerimento "+kg" quando le serie più pesanti arrivano in cima al range, timer di recupero, grafici, backup JSON.
 - [x] **Produzione Live**: Cloud Run in `europe-west8`, progetto `workout-tracker-uexmt`: [`https://workout-tracker-746817612779.europe-west8.run.app/`](https://workout-tracker-746817612779.europe-west8.run.app/).
 - [x] **Accesso**: Identity-Aware Proxy con login Google; autorizzato solo `daniele.davino12@gmail.com`. Client OAuth personalizzato (file in `~/.keys/workout-tracker-iap-oauth.json`, fuori dal repository). Codice di accesso di riserva nel secret `workout-access-code`.
 - [x] **Dati**: bucket `workout-tracker-uexmt-data` (europe-west8, versioning attivo), file `data/workout_history.json`.
@@ -29,7 +29,7 @@ Applicazione web moderna per il tracciamento degli allenamenti, progressioni di 
 - [x] API protetta da codice di accesso, sincronizzazione con unione dei dati, registrazione delle ripetizioni.
 - [x] Login con Google tramite IAP (client OAuth personalizzato), accesso pubblico chiuso.
 - [x] App installabile (PWA) con pulsante "Riaccedi"; installata e verificata sul telefono il 23/10/2026.
-- [ ] Eliminare il vecchio backend Firebase App Hosting `studio` (us-central1): risponde 404 e riceve solo traffico di bot.
+- [x] Eliminato il vecchio backend Firebase App Hosting `studio` (us-central1) il 20/11/2026.
 - [ ] Decidere se eliminare il vecchio bucket `ai-studio-bucket-746817612779-us-west1` (dati già migrati; contiene anche un archivio di build di AI Studio di marzo 2026).
-- [ ] Aggiornamento a una major di Next.js più recente (la linea 14.x ha avvisi di sicurezza aperti).
+- [x] Aggiornato a Next.js 16.4.6 + React 19, immagine Node 24, `npm audit` a zero (20/11/2026, revisione 00017).
 - [ ] Pianificare la migrazione del servizio Cloud Run su `dani-lab-507314` (quando vorrai consolidare i progetti).
